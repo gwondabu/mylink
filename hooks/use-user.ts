@@ -44,7 +44,7 @@ export function useUser() {
             const initialProfile: UserProfile = {
               uid: currentUser.uid,
               email: currentUser.email,
-              displayName: currentUser.displayName,
+              displayName: currentUser.email ? currentUser.email.split("@")[0] : (currentUser.displayName || "ML"),
               profile_image_url: currentUser.photoURL,
               profile_bio: "",
               theme: "default",

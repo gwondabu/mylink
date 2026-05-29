@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { LinkItem } from "@/data/links"
-import { Link2, Plus, Pencil, Trash2 } from "lucide-react"
+import { Link2, Plus, Pencil, Trash2, ArrowLeft } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -18,19 +18,23 @@ import { Spinner } from "@/components/ui/spinner"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 
 // 커스텀 훅 및 공통 컴포넌트 임포트
-import { useUser } from "@/hooks/use-user"
+import { useUser, UserProfile } from "@/hooks/use-user"
 import { Header } from "@/components/header"
 
-// Firestore 관련 모듈 임포트
-import { db } from "@/lib/firebase"
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "firebase/firestore"
+// Firestore 및 Auth 임포트
+import { db, auth } from "@/lib/firebase"
+import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "firebase/firestore"
 import { signInWithPopup, GoogleAuthProvider } from "firebase/auth"
-import { auth } from "@/lib/firebase"
 
 export default function Page() {
   const { user, profile, loading: authLoading } = useUser()
   const [links, setLinks] = useState<LinkItem[]>([])
   
+  // 미리보기/조회 모드 상태
+  const [previewUid, setPreviewUid] = useState<string | null>(null)
+  const [isPreview, setIsPreview] = useState(false)
+  const [previewProfile, setPreviewProfile] = useState<UserProfile | null>(null)
+
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState("")
   const [newUrl, setNewUrl] = useState("")
@@ -47,6 +51,38 @@ export default function Page() {
   // 삭제 확인 모달을 위한 로컬 상태들
   const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+
+  // URL 쿼리스트링 분석 (미리보기 모드 및 타인 페이지 조회 대응)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search)
+      const uidParam = params.get("uid")
+      const previewParam = params.get("preview")
+      
+      if (uidParam) {
+        setPreviewUid(uidParam)
+      }
+      if (previewParam === "true") {
+        setIsPreview(true)
+      }
+    }
+  }, [])
+
+  // 조회 대상 UID 정보 로드
+  useEffect(() => {
+    if (previewUid) {
+      // 1. 해당 유저의 프로필 fetch
+      const docRef = doc(db, "users", previewUid)
+      getDoc(docRef).then((docSnap) => {
+        if (docSnap.exists()) {
+          setPreviewProfile(docSnap.data() as UserProfile)
+        }
+      }).catch((err) => console.error("Preview profile fetch error:", err))
+
+      // 2. 해당 유저의 링크 fetch
+      fetchLinks(previewUid)
+    }
+  }, [previewUid])
 
   // Firestore에서 일회성 패치 방식으로 데이터를 갱신(Refetch)
   const fetchLinks = async (uid: string) => {
@@ -99,14 +135,16 @@ export default function Page() {
     }
   }
 
-  // 로그인 상태 변화에 따른 링크 갱신
+  // 로그인 상태 변화에 따른 링크 갱신 (미리보기 모드가 아닐 때만 동작)
   useEffect(() => {
-    if (user) {
-      fetchLinks(user.uid)
-    } else {
-      setLinks([])
+    if (!previewUid) {
+      if (user) {
+        fetchLinks(user.uid)
+      } else {
+        setLinks([])
+      }
     }
-  }, [user])
+  }, [user, previewUid])
 
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider()
@@ -246,8 +284,12 @@ export default function Page() {
     }
   }
 
-  // 아바타 이름 폴백용 이니셜
   const getInitials = () => {
+    // 1. 조회 모드일 때
+    if (previewUid && previewProfile) {
+      return (previewProfile.displayName || "ML").slice(0, 2).toUpperCase()
+    }
+    // 2. 본인 관리 모드일 때
     if (profile?.displayName) {
       return profile.displayName.slice(0, 2).toUpperCase()
     }
@@ -257,40 +299,176 @@ export default function Page() {
     return "ML"
   }
 
+  // 미리보기 모드인지 판별 (URL에 preview=true가 있고, 수정 권한이 없는 경우)
+  const isPreviewMode = isPreview || (previewUid !== null && (!user || user.uid !== previewUid))
+
   return (
-    <div className="flex min-h-screen flex-col items-center bg-background px-4 pb-16">
+    <div className="relative flex min-h-screen flex-col items-center bg-background px-4 pb-16 overflow-hidden">
       
-      {/* 상단 네비게이션 헤더 */}
-      <Header />
+      {/* 백그라운드 디자인용 이펙트 블러 서클 (Rich Aesthetics) */}
+      <div className="absolute top-[-10%] left-[-20%] w-[60%] aspect-square rounded-full bg-primary/10 blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-20%] w-[60%] aspect-square rounded-full bg-violet-500/10 blur-[120px] pointer-events-none" />
+
+      {/* 상단 헤더 영역 (미리보기 모드 또는 타인 조회 모드일 때는 간단한 뒤로가기 바 제공) */}
+      {isPreviewMode ? (
+        <header className="flex w-full max-w-md items-center justify-between py-4 border-b border-border/40 mb-8 shrink-0 z-10 animate-slide-down">
+          <button 
+            onClick={() => {
+              if (user && user.uid === previewUid) {
+                window.location.href = "/" // 편집 모드로 돌아가기
+              } else {
+                window.location.href = "/"
+              }
+            }}
+            className="flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+          >
+            <ArrowLeft className="h-3 w-3" />
+            <span>{user && user.uid === previewUid ? "편집 모드로 돌아가기" : "홈으로"}</span>
+          </button>
+          <span className="text-[10px] font-mono font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full select-none">
+            미리보기 모드
+          </span>
+        </header>
+      ) : (
+        <Header />
+      )}
 
       {/* 중앙 메인 콘텐츠 컨테이너 */}
-      <div className="flex w-full max-w-md flex-col items-center gap-8 my-auto w-full">
+      <div className="flex w-full max-w-md flex-col items-center gap-8 my-auto w-full z-10">
         
         {authLoading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <Spinner className="h-8 w-8 text-primary" />
             <p className="text-xs text-muted-foreground animate-pulse">사용자 정보 확인 중...</p>
           </div>
-        ) : !user ? (
-          /* 비로그인 "Development in One Link" 소개 화면 */
-          <div className="flex w-full flex-col gap-6 my-auto items-center text-center py-12 animate-fade-in">
-            <Card className="border border-border/80 bg-card/40 backdrop-blur-md w-full shadow-xl">
-              <CardContent className="flex flex-col items-center justify-center p-8 gap-6">
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary shadow-inner">
-                  <Link2 className="h-8 w-8" />
+        ) : isPreviewMode ? (
+          /* ========================================================
+             일반 방문자용 미리보기 모드 뷰 (조회 기능만 활성화, 수정 비노출)
+             ======================================================== */
+          <div className="flex w-full flex-col gap-8 animate-fade-in">
+            {/* 프로필 정보 */}
+            <div className="flex flex-col items-center text-center gap-4">
+              <Avatar size="lg" className="h-24 w-24 ring-4 ring-background shadow-lg">
+                <AvatarImage src={previewProfile?.profile_image_url || undefined} alt="Preview profile avatar" />
+                <AvatarFallback className="text-2xl font-bold bg-gradient-to-tr from-primary/80 to-violet-500/80 text-white">{getInitials()}</AvatarFallback>
+              </Avatar>
+              <div className="flex flex-col gap-1.5">
+                <h1 className="text-xl font-bold tracking-tight text-foreground">
+                  @{previewProfile?.displayName || "UserName"}
+                </h1>
+                {previewProfile?.profile_bio ? (
+                  <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-1 p-3 bg-card/60 backdrop-blur-md rounded-lg border border-border/40">
+                    {previewProfile.profile_bio}
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground/60 max-w-xs font-normal leading-relaxed mt-1">
+                    나의 소중한 소셜 미디어와 링크들을 한 곳에 모았습니다.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* 링크 리스트 */}
+            <div className="flex w-full flex-col gap-4">
+              {isLoading ? (
+                <div className="flex w-full flex-col gap-4 animate-pulse">
+                  {[1, 2].map((i) => (
+                    <Card key={i} className="overflow-hidden border border-border/40 bg-card/30">
+                      <CardContent className="h-14 bg-muted/40" />
+                    </Card>
+                  ))}
                 </div>
-                <div className="flex flex-col gap-2.5">
-                  <h2 className="text-xl font-extrabold tracking-tight text-foreground bg-gradient-to-r from-primary via-violet-500 to-indigo-500 bg-clip-text text-transparent">
+              ) : links.length === 0 ? (
+                <Card className="border border-dashed border-border bg-card/30">
+                  <CardContent className="p-8 text-center text-xs text-muted-foreground">
+                    등록된 링크가 없습니다.
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="flex w-full flex-col gap-4">
+                  {links.map((link) => (
+                    <a
+                      key={link.id}
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group block w-full transition-transform duration-200 active:scale-[0.99]"
+                    >
+                      <Card className="overflow-hidden border border-border bg-card/60 backdrop-blur-md transition-all duration-300 hover:bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.01]">
+                        <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/85 border border-border/60 group-hover:bg-primary/10 group-hover:border-primary/20 transition-colors">
+                            {link.favicon_url ? (
+                              <img
+                                src={link.favicon_url}
+                                alt={`${link.title} favicon`}
+                                className="h-5 w-5 object-contain rounded-sm"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = "none";
+                                  const sibling = e.currentTarget.nextElementSibling as HTMLElement;
+                                  if (sibling) sibling.style.display = "flex";
+                                }}
+                              />
+                            ) : null}
+                            <div className="items-center justify-center text-muted-foreground group-hover:text-primary" style={{ display: link.favicon_url ? "none" : "flex" }}>
+                              <Link2 className="h-4 w-4" />
+                            </div>
+                          </div>
+                          <div className="text-center min-w-0 px-2">
+                            <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
+                              {link.title}
+                            </h2>
+                          </div>
+                          <div className="w-10 h-10" /> {/* 우측 간격 맞춤용 공백 */}
+                        </CardContent>
+                      </Card>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : !user ? (
+          /* ========================================================
+             비로그인 애니메이션 랜딩페이지 (Vibrant, Premium Aesthetics)
+             ======================================================== */
+          <div className="flex w-full flex-col gap-8 my-auto items-center text-center py-8 animate-in fade-in-0 duration-1000 slide-in-from-bottom-8">
+            <Card className="border border-border/80 bg-card/45 backdrop-blur-lg w-full shadow-2xl relative overflow-hidden group">
+              {/* 카드 내부의 은은한 네온 빛 레이어 */}
+              <div className="absolute top-0 right-0 w-32 h-32 rounded-full bg-gradient-to-tr from-primary/30 to-violet-500/30 opacity-40 blur-2xl group-hover:scale-125 transition-transform duration-700" />
+              
+              <CardContent className="flex flex-col items-center justify-center p-8 gap-8">
+                {/* 로고 영역 */}
+                <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-tr from-primary via-violet-500 to-indigo-500 text-white shadow-xl shadow-primary/20 rotate-[-4deg] hover:rotate-[4deg] transition-transform duration-300">
+                  <Link2 className="h-10 w-10 animate-pulse" />
+                </div>
+                
+                {/* 메인 타이틀 및 소개글 */}
+                <div className="flex flex-col gap-3">
+                  <h2 className="text-2xl font-extrabold tracking-tight text-foreground bg-gradient-to-r from-primary via-violet-500 to-indigo-500 bg-clip-text text-transparent">
                     Development in One Link
                   </h2>
-                  <p className="text-xs text-muted-foreground max-w-[300px] leading-relaxed font-normal">
-                    나의 소스코드 레포지토리, 개발 블로그, 커리어 포트폴리오를 단 하나의 링크로 통합하여 보여주세요. 안전한 Google 소셜 로그인을 통해 간편하게 대시보드를 생성할 수 있습니다.
+                  <p className="text-xs text-muted-foreground max-w-[310px] leading-relaxed font-normal">
+                    나의 깃허브 레포지토리, 기술 블로그, 커리어 포트폴리오를 단 하나의 링크로 통합하여 표현해 보세요. 오직 개발자들을 위한 최상의 링크트리 솔루션입니다.
                   </p>
                 </div>
+
+                {/* 시각적 모형 링크 데모 카드 (Premium 느낌용 피처 데모) */}
+                <div className="w-full flex flex-col gap-2.5 opacity-80 border-t border-border/40 pt-6">
+                  <div className="flex items-center gap-3 p-3 bg-muted/40 rounded-xl border border-border/30 hover:bg-muted/60 transition-all select-none">
+                    <span className="text-sm">💻</span>
+                    <span className="text-xs font-semibold text-foreground/80">My GitHub Profile</span>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 bg-muted/40 rounded-xl border border-border/30 hover:bg-muted/60 transition-all select-none">
+                    <span className="text-sm">📝</span>
+                    <span className="text-xs font-semibold text-foreground/80">Tech Blog Links</span>
+                  </div>
+                </div>
+
+                {/* 소셜 로그인 시작하기 버튼 */}
                 <Button 
                   onClick={handleLogin}
                   style={{ backgroundColor: "#5B5FC7" }}
-                  className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none flex items-center justify-center gap-2 shadow-md shadow-violet-500/10"
+                  className="w-full text-white hover:opacity-95 active:scale-[0.98] transition-all py-6 font-semibold rounded-xl cursor-pointer border-none flex items-center justify-center gap-2 shadow-lg shadow-violet-500/20 text-sm mt-2"
                 >
                   Google 계정으로 시작하기
                 </Button>
@@ -298,7 +476,9 @@ export default function Page() {
             </Card>
           </div>
         ) : (
-          /* 로그인 성공 시의 내 링크 관리 화면 */
+          /* ========================================================
+             로그인 성공 시의 내 링크 관리 대시보드 화면
+             ======================================================== */
           <>
             {/* 사용자 프로필 헤더 */}
             <div className="flex flex-col items-center text-center gap-4">
