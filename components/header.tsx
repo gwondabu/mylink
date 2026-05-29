@@ -87,12 +87,12 @@ export function Header() {
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <div className="flex items-center gap-1.5 cursor-pointer outline-hidden hover:opacity-80 transition-all select-none">
+                    <button className="flex items-center gap-1.5 cursor-pointer outline-hidden hover:opacity-80 transition-all select-none border-none bg-transparent p-0">
                       <Avatar size="sm" className="ring-2 ring-primary/10">
                         <AvatarImage src={profile?.profile_image_url || user.photoURL || undefined} alt="User avatar" />
                         <AvatarFallback>{getInitials()}</AvatarFallback>
                       </Avatar>
-                    </div>
+                    </button>
                   }
                 />
                 <DropdownMenuContent align="end" className="w-48 bg-card border border-border shadow-lg p-1">
