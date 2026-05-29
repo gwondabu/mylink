@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
-import { dummyLinks, LinkItem } from "@/data/links"
+import { LinkItem } from "@/data/links"
 import { Link2, Plus } from "lucide-react"
 import {
   Dialog,
@@ -15,14 +15,55 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 
+// Firestore 연동을 위한 모듈 임포트
+import { db } from "@/lib/firebase"
+import { collection, addDoc, onSnapshot, query, orderBy, Timestamp } from "firebase/firestore"
+
 export default function Page() {
-  const [links, setLinks] = useState<LinkItem[]>(dummyLinks)
+  const [links, setLinks] = useState<LinkItem[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState("")
   const [newUrl, setNewUrl] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleAddLink = (e: React.FormEvent) => {
+  // Firestore 데이터 실시간 동기화 및 로드
+  useEffect(() => {
+    const q = query(
+      collection(db, "users/anonymous/links"),
+      orderBy("created_at", "desc")
+    )
+    
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const fetchedLinks: LinkItem[] = snapshot.docs.map((doc) => {
+          const data = doc.data()
+          let createdAtStr = new Date().toISOString()
+          if (data.created_at) {
+            createdAtStr = typeof data.created_at.toDate === "function"
+              ? data.created_at.toDate().toISOString()
+              : new Date(data.created_at).toISOString()
+          }
+          return {
+            id: doc.id,
+            title: data.title || "",
+            url: data.url || "",
+            favicon_url: data.favicon_url || "",
+            created_at: createdAtStr
+          }
+        })
+        setLinks(fetchedLinks)
+      },
+      (error) => {
+        console.error("Firestore links fetch error: ", error)
+      }
+    )
+
+    return () => unsubscribe()
+  }, [])
+
+  const handleAddLink = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMessage("")
 
@@ -52,23 +93,26 @@ export default function Page() {
         return
       }
 
+      setIsSubmitting(true)
+
       const favicon_url = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
 
-      const newLinkItem: LinkItem = {
-        id: `link-${Date.now()}`,
+      // Firestore에 문서 추가
+      await addDoc(collection(db, "users/anonymous/links"), {
         title: trimmedTitle,
         url: formattedUrl,
         favicon_url,
-        created_at: new Date().toISOString()
-      }
+        created_at: Timestamp.now()
+      })
 
-      setLinks([newLinkItem, ...links])
       setNewTitle("")
       setNewUrl("")
       setErrorMessage("")
       setIsDialogOpen(false)
     } catch (err) {
       setErrorMessage("올바른 형식의 URL을 입력해 주세요. (예: https://example.com)")
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -127,6 +171,7 @@ export default function Page() {
                         onChange={(e) => setNewTitle(e.target.value)}
                         placeholder="링크 제목 입력"
                         className="rounded-lg"
+                        disabled={isSubmitting}
                       />
                     </div>
                     <div className="flex flex-col gap-1.5">
@@ -136,6 +181,7 @@ export default function Page() {
                         onChange={(e) => setNewUrl(e.target.value)}
                         placeholder="https://..."
                         className="rounded-lg"
+                        disabled={isSubmitting}
                       />
                     </div>
                     {errorMessage && (
@@ -145,10 +191,11 @@ export default function Page() {
                   <DialogFooter className="mt-2">
                     <Button 
                       type="submit" 
+                      disabled={isSubmitting}
                       style={{ backgroundColor: "#5B5FC7" }} 
-                      className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none"
+                      className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      추가
+                      {isSubmitting ? "추가 중..." : "추가"}
                     </Button>
                   </DialogFooter>
                 </form>
@@ -242,6 +289,7 @@ export default function Page() {
     </div>
   )
 }
+
 
 
 
