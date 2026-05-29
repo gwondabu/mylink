@@ -15,15 +15,20 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 
-// Firebase 및 Auth 관련 모듈 임포트
-import { db, auth } from "@/lib/firebase"
+// 커스텀 훅 및 공통 컴포넌트 임포트
+import { useUser } from "@/hooks/use-user"
+import { Header } from "@/components/header"
+
+// Firestore 관련 모듈 임포트
+import { db } from "@/lib/firebase"
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "firebase/firestore"
-import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth"
+import { signInWithPopup, GoogleAuthProvider } from "firebase/auth"
+import { auth } from "@/lib/firebase"
 
 export default function Page() {
-  const [user, setUser] = useState<User | null>(null)
-  const [authLoading, setAuthLoading] = useState(true)
+  const { user, profile, loading: authLoading } = useUser()
   const [links, setLinks] = useState<LinkItem[]>([])
   
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -42,15 +47,6 @@ export default function Page() {
   // 삭제 확인 모달을 위한 로컬 상태들
   const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
-
-  // Auth 상태 변경 실시간 감시
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser)
-      setAuthLoading(false)
-    })
-    return () => unsubscribe()
-  }, [])
 
   // Firestore에서 일회성 패치 방식으로 데이터를 갱신(Refetch)
   const fetchLinks = async (uid: string) => {
@@ -118,14 +114,6 @@ export default function Page() {
       await signInWithPopup(auth, provider)
     } catch (error) {
       console.error("Login failed: ", error)
-    }
-  }
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth)
-    } catch (error) {
-      console.error("Logout failed: ", error)
     }
   }
 
@@ -258,44 +246,22 @@ export default function Page() {
     }
   }
 
+  // 아바타 이름 폴백용 이니셜
+  const getInitials = () => {
+    if (profile?.displayName) {
+      return profile.displayName.slice(0, 2).toUpperCase()
+    }
+    if (user?.displayName) {
+      return user.displayName.slice(0, 2).toUpperCase()
+    }
+    return "ML"
+  }
+
   return (
     <div className="flex min-h-screen flex-col items-center bg-background px-4 pb-16">
       
       {/* 상단 네비게이션 헤더 */}
-      <header className="flex w-full max-w-md items-center justify-between py-4 border-b border-border/40 mb-8 shrink-0">
-        <a href="/" className="flex items-center gap-1.5 text-sm font-extrabold tracking-widest text-foreground hover:opacity-90 select-none">
-          <span>🔗</span>
-          <span>MyLink</span>
-        </a>
-        <div className="flex items-center gap-3">
-          {authLoading ? (
-            <Spinner className="h-4 w-4 text-muted-foreground" />
-          ) : user ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-muted-foreground select-none max-w-[100px] truncate">
-                {user.displayName || user.email?.split("@")[0]}
-              </span>
-              <Button
-                variant="outline"
-                size="xs"
-                onClick={handleLogout}
-                className="text-[10px] px-2 py-1 h-auto rounded-md cursor-pointer font-semibold"
-              >
-                로그아웃
-              </Button>
-            </div>
-          ) : (
-            <Button
-              variant="outline"
-              size="xs"
-              onClick={handleLogin}
-              className="text-[10px] px-2 py-1 h-auto rounded-md cursor-pointer font-bold border-primary/30 hover:border-primary/80 transition-all text-primary"
-            >
-              Google 로그인
-            </Button>
-          )}
-        </div>
-      </header>
+      <Header />
 
       {/* 중앙 메인 콘텐츠 컨테이너 */}
       <div className="flex w-full max-w-md flex-col items-center gap-8 my-auto w-full">
@@ -306,17 +272,19 @@ export default function Page() {
             <p className="text-xs text-muted-foreground animate-pulse">사용자 정보 확인 중...</p>
           </div>
         ) : !user ? (
-          /* 비로그인 유도 안내 화면 */
-          <div className="flex w-full flex-col gap-6 my-auto items-center text-center py-12">
-            <Card className="border border-border bg-card/40 backdrop-blur-md w-full shadow-lg">
+          /* 비로그인 "Development in One Link" 소개 화면 */
+          <div className="flex w-full flex-col gap-6 my-auto items-center text-center py-12 animate-fade-in">
+            <Card className="border border-border/80 bg-card/40 backdrop-blur-md w-full shadow-xl">
               <CardContent className="flex flex-col items-center justify-center p-8 gap-6">
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary shadow-inner">
                   <Link2 className="h-8 w-8" />
                 </div>
-                <div className="flex flex-col gap-2">
-                  <h2 className="text-lg font-bold text-foreground">나만의 소셜 링크를 한곳에</h2>
-                  <p className="text-xs text-muted-foreground max-w-[280px] leading-relaxed">
-                    Google 소셜 로그인을 완료하고 나만의 소셜 미디어 및 웹 링크들을 쉽게 관리해 보세요. 이 서비스는 안전한 Firebase 연동으로 보호됩니다.
+                <div className="flex flex-col gap-2.5">
+                  <h2 className="text-xl font-extrabold tracking-tight text-foreground bg-gradient-to-r from-primary via-violet-500 to-indigo-500 bg-clip-text text-transparent">
+                    Development in One Link
+                  </h2>
+                  <p className="text-xs text-muted-foreground max-w-[300px] leading-relaxed font-normal">
+                    나의 소스코드 레포지토리, 개발 블로그, 커리어 포트폴리오를 단 하나의 링크로 통합하여 보여주세요. 안전한 Google 소셜 로그인을 통해 간편하게 대시보드를 생성할 수 있습니다.
                   </p>
                 </div>
                 <Button 
@@ -334,22 +302,27 @@ export default function Page() {
           <>
             {/* 사용자 프로필 헤더 */}
             <div className="flex flex-col items-center text-center gap-4">
-              <div className="relative flex h-24 w-24 shrink-0 overflow-hidden rounded-full bg-gradient-to-tr from-primary/80 to-violet-500/80 shadow-lg ring-4 ring-background transition-transform duration-300 hover:scale-105">
-                {user.photoURL ? (
-                  <img src={user.photoURL} alt={user.displayName || "Profile Image"} className="h-full w-full object-cover" />
-                ) : (
-                  <span className="flex h-full w-full items-center justify-center rounded-full text-2xl font-bold text-primary-foreground tracking-wider select-none">
-                    {(user.displayName || "ML").slice(0, 2).toUpperCase()}
-                  </span>
-                )}
-              </div>
+              <Avatar size="lg" className="h-24 w-24 ring-4 ring-background shadow-lg transition-transform duration-300 hover:scale-105">
+                <AvatarImage src={profile?.profile_image_url || user.photoURL || undefined} alt="Profile avatar image" />
+                <AvatarFallback className="text-2xl font-bold bg-gradient-to-tr from-primary/80 to-violet-500/80 text-white">{getInitials()}</AvatarFallback>
+              </Avatar>
+              
               <div className="flex flex-col gap-1.5">
                 <h1 className="text-xl font-bold tracking-tight text-foreground">
-                  @{user.displayName || user.email?.split("@")[0]}
+                  @{profile?.displayName || user.displayName || user.email?.split("@")[0]}
                 </h1>
                 <p className="text-xs text-muted-foreground max-w-xs font-normal leading-relaxed">
-                  {user.email}
+                  {profile?.email || user.email}
                 </p>
+                {profile?.profile_bio ? (
+                  <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-2 p-3 bg-muted/40 rounded-lg border border-border/40">
+                    {profile.profile_bio}
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground/60 max-w-xs font-normal leading-relaxed mt-1">
+                    나의 소중한 소셜 미디어와 링크들을 한 곳에 모았습니다.
+                  </p>
+                )}
               </div>
             </div>
 
