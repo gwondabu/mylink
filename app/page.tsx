@@ -23,7 +23,7 @@ import { Header } from "@/components/header"
 
 // Firestore 및 Auth 임포트
 import { db, auth } from "@/lib/firebase"
-import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "firebase/firestore"
+import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp } from "firebase/firestore"
 import { signInWithPopup, GoogleAuthProvider } from "firebase/auth"
 
 export default function Page() {
@@ -35,6 +35,7 @@ export default function Page() {
   const [isPreview, setIsPreview] = useState(false)
   const [previewProfile, setPreviewProfile] = useState<UserProfile | null>(null)
 
+  // 링크 추가 다이얼로그 상태
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState("")
   const [newUrl, setNewUrl] = useState("")
@@ -48,9 +49,12 @@ export default function Page() {
   const [editUrl, setEditUrl] = useState("")
   const [editError, setEditError] = useState("")
 
-  // 자기소개 편집을 위한 상태들
-  const [isEditingBio, setIsEditingBio] = useState(false)
-  const [editBio, setEditBio] = useState("")
+  // 프로필 수정을 위한 상태들
+  const [isProfileOpen, setIsProfileOpen] = useState(false)
+  const [profileUsername, setProfileUsername] = useState("")
+  const [profileDisplayName, setProfileDisplayName] = useState("")
+  const [profileBio, setProfileBio] = useState("")
+  const [profileError, setProfileError] = useState("")
 
   // 삭제 확인 모달을 위한 로컬 상태들
   const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
@@ -267,18 +271,69 @@ export default function Page() {
     }
   }
 
-  const handleUpdateBio = async (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!user) return
+    if (!user || !profile) return
+    setProfileError("")
+
+    const trimmedUsername = profileUsername.trim().toLowerCase()
+    const trimmedDisplayName = profileDisplayName.trim()
+    const trimmedBio = profileBio.trim()
+
+    // 1. 유효성 검사
+    if (!trimmedUsername) {
+      setProfileError("사용자 이름(username)을 입력해 주세요.")
+      return
+    }
+    if (!trimmedDisplayName) {
+      setProfileError("표시 이름(displayName)을 입력해 주세요.")
+      return
+    }
+    if (!/^[a-z0-9_-]+$/.test(trimmedUsername)) {
+      setProfileError("username은 영문 소문자, 숫자, 언더바(_), 하이픈(-)만 가능합니다.")
+      return
+    }
+    if (trimmedBio.length > 80) {
+      setProfileError("자기소개는 최대 80자까지 입력 가능합니다.")
+      return
+    }
+
+    // 2. [최적화] 변경된 사항이 없으면 Firestore 업데이트 없이 종료
+    if (
+      trimmedUsername === profile.username &&
+      trimmedDisplayName === profile.displayName &&
+      trimmedBio === profile.profile_bio
+    ) {
+      setIsProfileOpen(false)
+      return
+    }
+
     try {
       setIsSubmitting(true)
+
+      // 3. username 중복 체크 (본인 uid는 제외)
+      const usersRef = collection(db, "users")
+      const q = query(usersRef, where("username", "==", trimmedUsername))
+      const querySnapshot = await getDocs(q)
+      const isDuplicate = querySnapshot.docs.some(docSnap => docSnap.id !== user.uid)
+
+      if (isDuplicate) {
+        setProfileError("이미 사용 중인 사용자 이름(username)입니다.")
+        return
+      }
+
+      // 4. Firestore users/{userId} 개별 필드 업데이트
       const userDocRef = doc(db, "users", user.uid)
       await updateDoc(userDocRef, {
-        profile_bio: editBio.trim()
+        username: trimmedUsername,
+        displayName: trimmedDisplayName,
+        profile_bio: trimmedBio
       })
-      setIsEditingBio(false)
+
+      setIsProfileOpen(false)
     } catch (err) {
-      console.error("Failed to update bio: ", err)
+      console.error("Profile update error: ", err)
+      setProfileError("프로필 업데이트 중 오류가 발생했습니다.")
     } finally {
       setIsSubmitting(false)
     }
@@ -373,12 +428,15 @@ export default function Page() {
                 <AvatarImage src={previewProfile?.profile_image_url || undefined} alt="Preview profile avatar" />
                 <AvatarFallback className="text-2xl font-bold bg-gradient-to-tr from-primary/80 to-violet-500/80 text-white">{getInitials()}</AvatarFallback>
               </Avatar>
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5 items-center w-full">
                 <h1 className="text-xl font-bold tracking-tight text-foreground">
                   {previewProfile?.displayName || "UserName"}
                 </h1>
+                <p className="text-xs font-mono font-semibold text-primary bg-primary/5 px-2.5 py-0.5 rounded-full border border-primary/10 select-none">
+                  @{previewProfile?.username || "username"}
+                </p>
                 {previewProfile?.profile_bio ? (
-                  <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-1 p-3 bg-card/60 backdrop-blur-md rounded-lg border border-border/40">
+                  <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-2 p-3 bg-card/60 backdrop-blur-md rounded-lg border border-border/40 w-full text-center">
                     {previewProfile.profile_bio}
                   </p>
                 ) : (
@@ -472,7 +530,7 @@ export default function Page() {
               깃허브, 블로그, 포트폴리오를 가장 미니멀하고 직관적인 단 하나의 링크로 통합하여 표현해 보세요.
             </p>
 
-            {/* 시작하기 버튼 영역 (데모페이지 둘러보기 및 하단 목업 완전 삭제) */}
+            {/* 시작하기 버튼 영역 */}
             <div className="w-full max-w-xs flex flex-col gap-4 px-4">
               <Button 
                 onClick={handleLogin}
@@ -499,75 +557,100 @@ export default function Page() {
                 <h1 className="text-xl font-bold tracking-tight text-foreground">
                   {profile?.displayName || user.displayName || user.email?.split("@")[0]}
                 </h1>
-                <p className="text-xs text-muted-foreground max-w-xs font-normal leading-relaxed">
+                
+                {/* username 출력 영역 (@ 기호 닉네임에서 분리) */}
+                <p className="text-xs font-mono font-semibold text-primary bg-primary/5 px-2.5 py-0.5 rounded-full border border-primary/10 select-none">
+                  @{profile?.username || user.email?.split("@")[0]}
+                </p>
+
+                <p className="text-[10px] text-muted-foreground/60 select-none">
                   {profile?.email || user.email}
                 </p>
 
-                {/* 한 줄 자기소개 편집 인라인 기능 */}
-                {isEditingBio ? (
-                  <form onSubmit={handleUpdateBio} className="flex flex-col gap-2 w-full max-w-xs mt-2 animate-fade-in">
-                    <Input
-                      value={editBio}
-                      onChange={(e) => setEditBio(e.target.value)}
-                      placeholder="자기소개를 입력하세요 (최대 80자)"
-                      maxLength={80}
-                      className="text-xs rounded-lg h-9 bg-card"
-                      disabled={isSubmitting}
-                    />
-                    <div className="flex gap-2 justify-end">
-                      <Button
-                        type="button"
+                {profile?.profile_bio ? (
+                  <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-2 p-3 bg-muted/40 rounded-lg border border-border/40 w-full text-center">
+                    {profile.profile_bio}
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground/60 max-w-xs font-normal leading-relaxed mt-1">
+                    나의 소중한 소셜 미디어와 링크들을 한 곳에 모았습니다.
+                  </p>
+                )}
+
+                {/* 프로필 수정 모달 버튼 */}
+                <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
+                  <DialogTrigger
+                    render={
+                      <Button 
+                        onClick={() => {
+                          setProfileUsername(profile?.username || "")
+                          setProfileDisplayName(profile?.displayName || "")
+                          setProfileBio(profile?.profile_bio || "")
+                          setProfileError("")
+                        }}
                         variant="outline"
                         size="xs"
-                        onClick={() => {
-                          setIsEditingBio(false)
-                          setEditBio(profile?.profile_bio || "")
-                        }}
-                        className="text-[10px] rounded-md h-7 cursor-pointer"
-                        disabled={isSubmitting}
-                      >
-                        취소
-                      </Button>
-                      <Button
-                        type="submit"
-                        size="xs"
-                        style={{ backgroundColor: "#5B5FC7" }}
-                        className="text-[10px] text-white hover:opacity-90 rounded-md h-7 cursor-pointer border-none flex items-center justify-center gap-1.5"
-                        disabled={isSubmitting}
-                      >
-                        {isSubmitting ? <Spinner /> : "저장"}
-                      </Button>
-                    </div>
-                  </form>
-                ) : (
-                  <div className="flex flex-col items-center gap-1.5 w-full">
-                    {profile?.profile_bio ? (
-                      <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-2 p-3 bg-muted/40 rounded-lg border border-border/40 relative group w-full text-center">
-                        {profile.profile_bio}
-                        <button
-                          onClick={() => {
-                            setEditBio(profile.profile_bio || "")
-                            setIsEditingBio(true)
-                          }}
-                          className="absolute right-2 top-2 p-1 text-muted-foreground/60 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        className="mt-3 text-[11px] rounded-lg h-7 px-3 cursor-pointer flex items-center gap-1.5 hover:bg-muted"
+                      />
+                    }
+                  >
+                    <Pencil className="h-3 w-3" />
+                    <span>프로필 수정</span>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md">
+                    <form onSubmit={handleSaveProfile} className="flex flex-col gap-4">
+                      <DialogHeader>
+                        <DialogTitle className="text-lg font-bold">프로필 수정</DialogTitle>
+                      </DialogHeader>
+                      <div className="flex flex-col gap-3 py-2">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-semibold text-muted-foreground">사용자 이름 (username)</label>
+                          <Input
+                            value={profileUsername}
+                            onChange={(e) => setProfileUsername(e.target.value)}
+                            placeholder="사용자 고유 아이디 (영문 소문자/숫자/_/-)"
+                            className="rounded-lg text-xs"
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-semibold text-muted-foreground">표시 이름 (displayName)</label>
+                          <Input
+                            value={profileDisplayName}
+                            onChange={(e) => setProfileDisplayName(e.target.value)}
+                            placeholder="노출될 실명 또는 닉네임"
+                            className="rounded-lg text-xs"
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-semibold text-muted-foreground">한 줄 소개 (bio)</label>
+                          <Input
+                            value={profileBio}
+                            onChange={(e) => setProfileBio(e.target.value)}
+                            placeholder="나를 설명하는 한 줄 문구 (최대 80자)"
+                            maxLength={80}
+                            className="rounded-lg text-xs"
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                        {profileError && (
+                          <p className="text-xs font-medium text-red-500 mt-1">{profileError}</p>
+                        )}
+                      </div>
+                      <DialogFooter className="mt-2">
+                        <Button 
+                          type="submit" 
+                          disabled={isSubmitting}
+                          style={{ backgroundColor: "#5B5FC7" }} 
+                          className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                      </p>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setEditBio("")
-                          setIsEditingBio(true)
-                        }}
-                        className="text-xs text-primary hover:underline mt-2 flex items-center gap-1 cursor-pointer"
-                      >
-                        <Plus className="h-3 w-3" />
-                        <span>한 줄 자기소개 추가</span>
-                      </button>
-                    )}
-                  </div>
-                )}
+                          {isSubmitting ? <Spinner /> : "저장"}
+                        </Button>
+                      </DialogFooter>
+                    </form>
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
 

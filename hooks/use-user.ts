@@ -8,6 +8,7 @@ import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore"
 export interface UserProfile {
   uid: string
   email: string | null
+  username: string
   displayName: string | null
   profile_image_url: string | null
   profile_bio: string
@@ -44,7 +45,8 @@ export function useUser() {
             const initialProfile: UserProfile = {
               uid: currentUser.uid,
               email: currentUser.email,
-              displayName: currentUser.email ? currentUser.email.split("@")[0] : (currentUser.displayName || "ML"),
+              username: currentUser.email ? currentUser.email.split("@")[0] : currentUser.uid,
+              displayName: currentUser.displayName || (currentUser.email ? currentUser.email.split("@")[0] : "ML"),
               profile_image_url: currentUser.photoURL,
               profile_bio: "",
               theme: "default",
