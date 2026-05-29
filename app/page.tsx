@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
 import { LinkItem } from "@/data/links"
@@ -54,6 +54,56 @@ export default function Page() {
   const [profileError, setProfileError] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
+
+  // 🎮 가상 모바일 미리보기(Live Sandbox)용 인터랙티브 로컬 상태
+  interface VirtualParticle {
+    id: number
+    x: number
+    y: number
+    emoji: string
+    angle: number
+    speed: number
+  }
+  const [virtualClicks, setVirtualClicks] = useState<{ [key: string]: number }>({
+    github: 24,
+    blog: 12,
+    portfolio: 45,
+  })
+  const [virtualParticles, setVirtualParticles] = useState<VirtualParticle[]>([])
+  const particleIdRef = useRef(0)
+
+  const handleVirtualClick = (e: React.MouseEvent<HTMLButtonElement>, key: string) => {
+    // 1. 가상 클릭 카운트 증가
+    setVirtualClicks((prev) => ({
+      ...prev,
+      [key]: prev[key] + 1,
+    }))
+
+    // 2. 폭죽 파티클 데이터 주입 (버튼 상대 기준)
+    const rect = e.currentTarget.getBoundingClientRect()
+    const clickX = e.clientX - rect.left
+    const clickY = e.clientY - rect.top
+
+    const emojis = ["🎉", "✨", "🔥", "🚀", "💎", "👍", "👾", "🌟"]
+    const newParticles: VirtualParticle[] = Array.from({ length: 8 }).map((_, i) => {
+      const angle = (i * 45 * Math.PI) / 180 + (Math.random() - 0.5) * 0.3
+      const speed = 2 + Math.random() * 3
+      return {
+        id: particleIdRef.current++,
+        x: clickX,
+        y: clickY,
+        emoji: emojis[Math.floor(Math.random() * emojis.length)],
+        angle,
+        speed,
+      }
+    })
+
+    setVirtualParticles((prev) => [...prev, ...newParticles])
+
+    setTimeout(() => {
+      setVirtualParticles((prev) => prev.filter((p) => !newParticles.some((np) => np.id === p.id)))
+    }, 800)
+  }
 
   // 삭제 확인 모달을 위한 로컬 상태들
   const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
@@ -442,6 +492,38 @@ export default function Page() {
           </div>
         ) : !user ? (
           <div className="flex w-full flex-col items-center justify-center min-h-[75vh] py-8 text-center animate-in fade-in-0 duration-1000 slide-in-from-bottom-8">
+            <style dangerouslySetInnerHTML={{__html: `
+              @keyframes floatIcon {
+                0%, 100% { transform: translateY(0px) rotate(0deg); }
+                50% { transform: translateY(-8px) rotate(2deg); }
+              }
+              .animate-float-icon {
+                animation: floatIcon 4s ease-in-out infinite;
+              }
+              .animate-float-icon-slow {
+                animation: floatIcon 5s ease-in-out infinite;
+              }
+              .animate-float-icon-fast {
+                animation: floatIcon 3.2s ease-in-out infinite;
+              }
+              @keyframes particleFly {
+                0% {
+                  transform: translate(-50%, -50%) scale(0.4) translate(0, 0);
+                  opacity: 1;
+                }
+                80% {
+                  opacity: 0.9;
+                }
+                100% {
+                  transform: translate(-50%, -50%) scale(1.1) translate(var(--x), var(--y));
+                  opacity: 0;
+                }
+              }
+              .animate-particle-fly {
+                animation: particleFly 0.8s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+              }
+            `}} />
+
             <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700/80 text-[10px] font-semibold tracking-wider uppercase mb-6 select-none animate-pulse">
               Introducing MyLink
             </div>
@@ -457,13 +539,123 @@ export default function Page() {
               깃허브, 블로그, 포트폴리오를 가장 미니멀하고 직관적인 단 하나의 링크로 통합하여 표현해 보세요.
             </p>
 
-            <div className="w-full max-w-xs flex flex-col gap-4 px-4 mb-10">
+            <div className="w-full max-w-xs flex flex-col gap-4 px-4 mb-8">
               <Link 
                 href="/login"
                 className="w-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-100 active:scale-[0.98] transition-all py-3.5 text-sm font-semibold rounded-full cursor-pointer border-none shadow-md flex items-center justify-center"
               >
                 시작하기
               </Link>
+            </div>
+
+            {/* 🔗 개발자가 좋아하는 소셜 아이콘 둥실 갤러리 */}
+            <div className="flex items-center justify-center gap-6 my-3 mb-10 select-none text-xl">
+              <div className="animate-float-icon hover:scale-125 transition-all cursor-help" title="GitHub">
+                💻
+              </div>
+              <div className="animate-float-icon-slow hover:scale-125 transition-all cursor-help" title="LinkedIn">
+                💼
+              </div>
+              <div className="animate-float-icon-fast hover:scale-125 transition-all cursor-help" title="Tech Blog">
+                📝
+              </div>
+              <div className="animate-float-icon hover:scale-125 transition-all cursor-help" title="Email">
+                📧
+              </div>
+              <div className="animate-float-icon-slow hover:scale-125 transition-all cursor-help" title="Portfolio">
+                🌐
+              </div>
+            </div>
+
+            {/* 📱 실시간 가상 모바일 미리보기 (Live Sandbox) */}
+            <div className="flex flex-col items-center gap-2 mb-12 w-full px-4 animate-in fade-in-0 duration-1000 slide-in-from-bottom-12">
+              <div className="flex flex-col gap-1 items-center mb-3">
+                <span className="text-[10px] font-bold tracking-widest text-primary uppercase bg-primary/10 px-2 py-0.5 rounded-md">Live Sandbox</span>
+                <p className="text-[11px] text-zinc-400 mt-1">아래의 가상 링크들을 직접 클릭해서 체험해 보세요!</p>
+              </div>
+
+              {/* 가상 스마트폰 목업 프레임 */}
+              <div className="border-[5px] border-zinc-950 dark:border-zinc-800 rounded-[42px] bg-zinc-50 dark:bg-zinc-950 p-4 w-[280px] aspect-[9/16] shadow-2xl relative flex flex-col items-center select-none border-b-[8px]">
+                
+                {/* 폰 노치 디테일 */}
+                <div className="w-14 h-4.5 bg-zinc-950 dark:bg-zinc-800 rounded-full shrink-0 mb-4 flex items-center justify-end px-2 gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-zinc-850 dark:bg-zinc-900" />
+                  <div className="w-1 h-1 rounded-full bg-blue-900" />
+                </div>
+
+                {/* 폰 상단 헤더 프로필 */}
+                <div className="flex flex-col items-center gap-2 w-full text-center mb-5 mt-1">
+                  <div className="h-14 w-14 rounded-full bg-gradient-to-tr from-violet-500 to-indigo-500 flex items-center justify-center font-extrabold text-white text-base shadow-sm ring-2 ring-background">
+                    DV
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">@developer</span>
+                    <div className="flex gap-2.5 justify-center text-[9px] text-zinc-400 font-semibold">
+                      <span>링크 3</span>
+                      <span>•</span>
+                      <span className="text-primary font-bold">가상 클릭 {virtualClicks.github + virtualClicks.blog + virtualClicks.portfolio}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 가상 링크 리스트 */}
+                <div className="flex flex-col gap-3 w-full grow relative">
+                  
+                  {/* 가상 파티클(폭죽) 렌더링 영역 */}
+                  {virtualParticles.map((p) => {
+                    const vx = `${Math.cos(p.angle) * p.speed * 12}px`
+                    const vy = `${Math.sin(p.angle) * p.speed * 12}px`
+                    return (
+                      <span
+                        key={p.id}
+                        className="absolute text-sm pointer-events-none z-50 animate-particle-fly"
+                        style={{
+                          left: p.x,
+                          top: p.y,
+                          // 커스텀 CSS 변수를 전달해 키프레임과 맵핑
+                          ["--x" as any]: vx,
+                          ["--y" as any]: vy,
+                        }}
+                      >
+                        {p.emoji}
+                      </span>
+                    )
+                  })}
+
+                  <button
+                    onClick={(e) => handleVirtualClick(e, "github")}
+                    className="relative w-full py-3 px-4 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur-xs text-[11px] font-bold text-zinc-800 dark:text-zinc-200 flex justify-between items-center hover:bg-white dark:hover:bg-zinc-900 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-xs"
+                  >
+                    <span>💻 GitHub</span>
+                    <span className="font-mono text-[9px] bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-500">
+                      {virtualClicks.github} clicks
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={(e) => handleVirtualClick(e, "blog")}
+                    className="relative w-full py-3 px-4 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur-xs text-[11px] font-bold text-zinc-800 dark:text-zinc-200 flex justify-between items-center hover:bg-white dark:hover:bg-zinc-900 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-xs"
+                  >
+                    <span>📝 Tech Blog</span>
+                    <span className="font-mono text-[9px] bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-500">
+                      {virtualClicks.blog} clicks
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={(e) => handleVirtualClick(e, "portfolio")}
+                    className="relative w-full py-3 px-4 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 backdrop-blur-xs text-[11px] font-bold text-zinc-800 dark:text-zinc-200 flex justify-between items-center hover:bg-white dark:hover:bg-zinc-900 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-xs"
+                  >
+                    <span>💼 Portfolio</span>
+                    <span className="font-mono text-[9px] bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-500">
+                      {virtualClicks.portfolio} clicks
+                    </span>
+                  </button>
+                </div>
+
+                {/* 폰 홈 인디케이터 바 */}
+                <div className="w-20 h-1 bg-zinc-300 dark:bg-zinc-800 rounded-full mt-2 shrink-0" />
+              </div>
             </div>
 
             {/* 3대 핵심 기능 소개 카드 */}
