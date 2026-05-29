@@ -48,6 +48,10 @@ export default function Page() {
   const [editUrl, setEditUrl] = useState("")
   const [editError, setEditError] = useState("")
 
+  // 자기소개 편집을 위한 상태들
+  const [isEditingBio, setIsEditingBio] = useState(false)
+  const [editBio, setEditBio] = useState("")
+
   // 삭제 확인 모달을 위한 로컬 상태들
   const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
@@ -263,6 +267,23 @@ export default function Page() {
     }
   }
 
+  const handleUpdateBio = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!user) return
+    try {
+      setIsSubmitting(true)
+      const userDocRef = doc(db, "users", user.uid)
+      await updateDoc(userDocRef, {
+        profile_bio: editBio.trim()
+      })
+      setIsEditingBio(false)
+    } catch (err) {
+      console.error("Failed to update bio: ", err)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const handleDeleteLink = async () => {
     if (!user || !linkToDelete) return
 
@@ -354,7 +375,7 @@ export default function Page() {
               </Avatar>
               <div className="flex flex-col gap-1.5">
                 <h1 className="text-xl font-bold tracking-tight text-foreground">
-                  @{previewProfile?.displayName || "UserName"}
+                  {previewProfile?.displayName || "UserName"}
                 </h1>
                 {previewProfile?.profile_bio ? (
                   <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-1 p-3 bg-card/60 backdrop-blur-md rounded-lg border border-border/40">
@@ -451,42 +472,14 @@ export default function Page() {
               깃허브, 블로그, 포트폴리오를 가장 미니멀하고 직관적인 단 하나의 링크로 통합하여 표현해 보세요.
             </p>
 
-            {/* 시작하기 및 데모 둘러보기 버튼 영역 */}
-            <div className="w-full max-w-xs flex flex-col gap-4 px-4 mb-16">
+            {/* 시작하기 버튼 영역 (데모페이지 둘러보기 및 하단 목업 완전 삭제) */}
+            <div className="w-full max-w-xs flex flex-col gap-4 px-4">
               <Button 
                 onClick={handleLogin}
                 className="w-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-100 active:scale-[0.98] transition-all py-6 text-sm font-semibold rounded-full cursor-pointer border-none shadow-md"
               >
                 Google 계정으로 시작하기
               </Button>
-              <a 
-                href="/?uid=anonymous&preview=true" 
-                className="text-xs text-zinc-500 hover:text-zinc-950 dark:hover:text-white hover:underline transition-all"
-              >
-                데모 페이지 둘러보기 &rarr;
-              </a>
-            </div>
-
-            {/* 하단 모던 브라우저 목업 데모 (화면 꽉 채우기 목적) */}
-            <div className="w-full max-w-md px-2">
-              <div className="relative rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-900/40 backdrop-blur-md p-5 shadow-2xl overflow-hidden text-left">
-                <div className="flex items-center gap-1.5 border-b border-zinc-200 dark:border-zinc-800/80 pb-3.5 mb-3.5 select-none">
-                  <div className="h-2.5 w-2.5 rounded-full bg-zinc-300 dark:bg-zinc-700" />
-                  <div className="h-2.5 w-2.5 rounded-full bg-zinc-300 dark:bg-zinc-700" />
-                  <div className="h-2.5 w-2.5 rounded-full bg-zinc-300 dark:bg-zinc-700" />
-                  <span className="text-[9px] text-zinc-400 dark:text-zinc-600 ml-2 font-mono">mylink.to/developer</span>
-                </div>
-                <div className="flex flex-col gap-2.5">
-                  <div className="h-10 rounded-xl bg-white dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 text-xs font-semibold text-zinc-800 dark:text-zinc-200 shadow-sm">
-                    <span className="flex items-center gap-2">💻 GitHub Profile</span>
-                    <span className="text-zinc-400">&rarr;</span>
-                  </div>
-                  <div className="h-10 rounded-xl bg-white dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 text-xs font-semibold text-zinc-800 dark:text-zinc-200 shadow-sm">
-                    <span className="flex items-center gap-2">📝 Development Blog</span>
-                    <span className="text-zinc-400">&rarr;</span>
-                  </div>
-                </div>
-              </div>
             </div>
             
           </div>
@@ -496,27 +489,84 @@ export default function Page() {
              ======================================================== */
           <>
             {/* 사용자 프로필 헤더 */}
-            <div className="flex flex-col items-center text-center gap-4 animate-fade-in">
+            <div className="flex flex-col items-center text-center gap-4 animate-fade-in w-full">
               <Avatar size="lg" className="h-24 w-24 ring-4 ring-background shadow-lg transition-transform duration-300 hover:scale-105">
                 <AvatarImage src={profile?.profile_image_url || user.photoURL || undefined} alt="Profile avatar image" />
                 <AvatarFallback className="text-2xl font-bold bg-gradient-to-tr from-primary/80 to-violet-500/80 text-white">{getInitials()}</AvatarFallback>
               </Avatar>
               
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5 items-center w-full">
                 <h1 className="text-xl font-bold tracking-tight text-foreground">
-                  @{profile?.displayName || user.displayName || user.email?.split("@")[0]}
+                  {profile?.displayName || user.displayName || user.email?.split("@")[0]}
                 </h1>
                 <p className="text-xs text-muted-foreground max-w-xs font-normal leading-relaxed">
                   {profile?.email || user.email}
                 </p>
-                {profile?.profile_bio ? (
-                  <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-2 p-3 bg-muted/40 rounded-lg border border-border/40">
-                    {profile.profile_bio}
-                  </p>
+
+                {/* 한 줄 자기소개 편집 인라인 기능 */}
+                {isEditingBio ? (
+                  <form onSubmit={handleUpdateBio} className="flex flex-col gap-2 w-full max-w-xs mt-2 animate-fade-in">
+                    <Input
+                      value={editBio}
+                      onChange={(e) => setEditBio(e.target.value)}
+                      placeholder="자기소개를 입력하세요 (최대 80자)"
+                      maxLength={80}
+                      className="text-xs rounded-lg h-9 bg-card"
+                      disabled={isSubmitting}
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        onClick={() => {
+                          setIsEditingBio(false)
+                          setEditBio(profile?.profile_bio || "")
+                        }}
+                        className="text-[10px] rounded-md h-7 cursor-pointer"
+                        disabled={isSubmitting}
+                      >
+                        취소
+                      </Button>
+                      <Button
+                        type="submit"
+                        size="xs"
+                        style={{ backgroundColor: "#5B5FC7" }}
+                        className="text-[10px] text-white hover:opacity-90 rounded-md h-7 cursor-pointer border-none flex items-center justify-center gap-1.5"
+                        disabled={isSubmitting}
+                      >
+                        {isSubmitting ? <Spinner /> : "저장"}
+                      </Button>
+                    </div>
+                  </form>
                 ) : (
-                  <p className="text-sm text-muted-foreground/60 max-w-xs font-normal leading-relaxed mt-1">
-                    나의 소중한 소셜 미디어와 링크들을 한 곳에 모았습니다.
-                  </p>
+                  <div className="flex flex-col items-center gap-1.5 w-full">
+                    {profile?.profile_bio ? (
+                      <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-2 p-3 bg-muted/40 rounded-lg border border-border/40 relative group w-full text-center">
+                        {profile.profile_bio}
+                        <button
+                          onClick={() => {
+                            setEditBio(profile.profile_bio || "")
+                            setIsEditingBio(true)
+                          }}
+                          className="absolute right-2 top-2 p-1 text-muted-foreground/60 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      </p>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setEditBio("")
+                          setIsEditingBio(true)
+                        }}
+                        className="text-xs text-primary hover:underline mt-2 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="h-3 w-3" />
+                        <span>한 줄 자기소개 추가</span>
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

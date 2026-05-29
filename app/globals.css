@@ -117,15 +117,12 @@
 }
 
 @layer base {
-  * {
+  *, *::before, *::after {
     @apply border-border outline-ring/50;
+    transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease, fill 0.4s ease, stroke 0.4s ease;
   }
   body {
     @apply bg-background text-foreground;
-    transition: background-color 0.4s ease, color 0.4s ease;
-  }
-  .card, header, button, input, div, a, p, span, h1, h2, h3, img, svg {
-    transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease;
   }
   html {
     @apply font-sans;
