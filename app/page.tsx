@@ -33,11 +33,6 @@ export default function Page() {
   const { user, profile, loading: authLoading } = useUser()
   const queryClient = useQueryClient()
   
-  // 미리보기/조회 모드 상태
-  const [previewUid, setPreviewUid] = useState<string | null>(null)
-  const [isPreview, setIsPreview] = useState(false)
-  const [previewProfile, setPreviewProfile] = useState<UserProfile | null>(null)
-
   // 링크 추가 다이얼로그 상태
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState("")
@@ -62,45 +57,13 @@ export default function Page() {
   const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
 
-  // URL 쿼리스트링 분석 (미리보기 모드 및 타인 페이지 조회 대응)
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search)
-      const uidParam = params.get("uid")
-      const previewParam = params.get("preview")
-      
-      if (uidParam) {
-        setPreviewUid(uidParam)
-      }
-      if (previewParam === "true") {
-        setIsPreview(true)
-      }
-    }
-  }, [])
-
-  // 조회 대상 UID 정보 로드
-  useEffect(() => {
-    if (previewUid) {
-      // 해당 유저의 프로필 fetch
-      const docRef = doc(db, "users", previewUid)
-      getDoc(docRef).then((docSnap) => {
-        if (docSnap.exists()) {
-          setPreviewProfile(docSnap.data() as UserProfile)
-        }
-      }).catch((err) => console.error("Preview profile fetch error:", err))
-    }
-  }, [previewUid])
-
-  // 현재 데이터 소유자 UID 정의
-  const targetUid = previewUid || user?.uid
-
   // 1. [TanStack Query] 링크 리스트 조회 (staleTime 5분 지정, enabled 제어)
   const { data: links = [], isLoading } = useQuery<LinkItem[]>({
-    queryKey: ["links", targetUid],
+    queryKey: ["links", user?.uid],
     queryFn: async () => {
-      if (!targetUid) return []
+      if (!user?.uid) return []
       const q = query(
-        collection(db, `users/${targetUid}/links`),
+        collection(db, `users/${user.uid}/links`),
         orderBy("createdAt", "desc")
       )
       const snapshot = await getDocs(q)
@@ -136,7 +99,7 @@ export default function Page() {
         }
       })
     },
-    enabled: !!targetUid
+    enabled: !!user?.uid
   })
 
   // 2. [TanStack Query Mutation] 링크 추가 (낙관적 업데이트 적용)
@@ -433,11 +396,6 @@ export default function Page() {
   }
 
   const getInitials = () => {
-    // 1. 조회 모드일 때
-    if (previewUid && previewProfile) {
-      return (previewProfile.displayName || "ML").slice(0, 2).toUpperCase()
-    }
-    // 2. 본인 관리 모드일 때
     if (profile?.displayName) {
       return profile.displayName.slice(0, 2).toUpperCase()
     }
@@ -446,9 +404,6 @@ export default function Page() {
     }
     return "ML"
   }
-
-  // 미리보기 모드인지 판별 (URL에 preview=true가 있고, 수정 권한이 없는 경우)
-  const isPreviewMode = isPreview || (previewUid !== null && (!user || user.uid !== previewUid))
 
   // 로딩 상태 통합 (리액트 쿼리 Mutation 로딩 상태 포함)
   const isMutating = addMutation.isPending || updateMutation.isPending || deleteMutation.isPending || isSubmitting
@@ -460,29 +415,8 @@ export default function Page() {
       <div className="absolute top-[-20%] left-[-10%] w-[70%] aspect-square rounded-full bg-zinc-200/20 dark:bg-zinc-800/10 blur-[150px] pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-10%] w-[70%] aspect-square rounded-full bg-zinc-300/20 dark:bg-zinc-700/10 blur-[150px] pointer-events-none" />
 
-      {/* 상단 헤더 영역 (미리보기 모드 또는 타인 조회 모드일 때는 간단한 뒤로가기 바 제공) */}
-      {isPreviewMode ? (
-        <header className="flex w-full max-w-md items-center justify-between py-4 border-b border-border/40 mb-8 shrink-0 z-10 animate-slide-down">
-          <button 
-            onClick={() => {
-              if (user && user.uid === previewUid) {
-                window.location.href = "/" // 편집 모드로 돌아가기
-              } else {
-                window.location.href = "/"
-              }
-            }}
-            className="flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-          >
-            <ArrowLeft className="h-3 w-3" />
-            <span>{user && user.uid === previewUid ? "편집 모드로 돌아가기" : "홈으로"}</span>
-          </button>
-          <span className="text-[10px] font-mono font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full select-none">
-            미리보기 모드
-          </span>
-        </header>
-      ) : (
-        <Header />
-      )}
+      {/* 상단 헤더 영역 */}
+      <Header />
 
       {/* 중앙 메인 콘텐츠 컨테이너 */}
       <div className="flex w-full max-w-md flex-col items-center gap-8 my-auto w-full z-10">
@@ -492,95 +426,6 @@ export default function Page() {
             <Spinner className="h-8 w-8 text-primary" />
             <p className="text-xs text-muted-foreground animate-pulse">사용자 정보 확인 중...</p>
           </div>
-        ) : isPreviewMode ? (
-          /* ========================================================
-             일반 방문자용 미리보기 모드 뷰 (조회 기능만 활성화, 수정 비노출)
-             ======================================================== */
-          <div className="flex w-full flex-col gap-8 animate-fade-in">
-            {/* 프로필 정보 */}
-            <div className="flex flex-col items-center text-center gap-4">
-              <Avatar size="lg" className="h-24 w-24 ring-4 ring-background shadow-lg">
-                <AvatarImage src={previewProfile?.profile_image_url || undefined} alt="Preview profile avatar" />
-                <AvatarFallback className="text-2xl font-bold bg-gradient-to-tr from-primary/80 to-violet-500/80 text-white">{getInitials()}</AvatarFallback>
-              </Avatar>
-              <div className="flex flex-col gap-1.5 items-center w-full">
-                <h1 className="text-xl font-bold tracking-tight text-foreground">
-                  {previewProfile?.displayName || "UserName"}
-                </h1>
-                <p className="text-xs font-mono font-semibold text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 rounded-full border border-zinc-200 dark:border-zinc-700 select-none">
-                  @{previewProfile?.username || "username"}
-                </p>
-                {previewProfile?.profile_bio ? (
-                  <p className="text-sm text-zinc-600 dark:text-zinc-300 max-w-xs font-normal leading-relaxed mt-2 p-3 bg-zinc-50/60 dark:bg-zinc-900/60 backdrop-blur-md rounded-lg border border-zinc-200 dark:border-zinc-850 w-full text-center">
-                    {previewProfile.profile_bio}
-                  </p>
-                ) : (
-                  <p className="text-sm text-zinc-400 dark:text-zinc-550 max-w-xs font-normal leading-relaxed mt-1">
-                    나의 소중한 소셜 미디어와 링크들을 한 곳에 모았습니다.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* 링크 리스트 */}
-            <div className="flex w-full flex-col gap-4">
-              {isLoading ? (
-                <div className="flex w-full flex-col gap-4 animate-pulse">
-                  {[1, 2].map((i) => (
-                    <Card key={i} className="overflow-hidden border border-border/40 bg-card/30">
-                      <CardContent className="h-14 bg-muted/40" />
-                    </Card>
-                  ))}
-                </div>
-              ) : links.length === 0 ? (
-                <Card className="border border-dashed border-border bg-card/30">
-                  <CardContent className="p-8 text-center text-xs text-muted-foreground">
-                    등록된 링크가 없습니다.
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="flex w-full flex-col gap-4">
-                  {links.map((link) => (
-                    <a
-                      key={link.id}
-                      href={link.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group block w-full transition-transform duration-200 active:scale-[0.99]"
-                    >
-                      <Card className="overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 bg-white/40 dark:bg-zinc-900/40 backdrop-blur-md transition-all duration-300 hover:bg-white dark:hover:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-md hover:scale-[1.01]">
-                        <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200/60 dark:border-zinc-700/60 group-hover:bg-zinc-200 dark:group-hover:bg-zinc-700 transition-colors">
-                            {link.favicon_url ? (
-                              <img
-                                src={link.favicon_url}
-                                alt={`${link.title} favicon`}
-                                className="h-5 w-5 object-contain rounded-sm"
-                                onError={(e) => {
-                                  e.currentTarget.style.display = "none";
-                                  const sibling = e.currentTarget.nextElementSibling as HTMLElement;
-                                  if (sibling) sibling.style.display = "flex";
-                                }}
-                              />
-                            ) : null}
-                            <div className="items-center justify-center text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-650" style={{ display: link.favicon_url ? "none" : "flex" }}>
-                              <Link2 className="h-4 w-4" />
-                            </div>
-                          </div>
-                          <div className="text-center min-w-0 px-2">
-                            <h2 className="text-sm font-semibold tracking-wide text-zinc-800 dark:text-zinc-250 truncate">
-                              {link.title}
-                            </h2>
-                          </div>
-                          <div className="w-10 h-10" />
-                        </CardContent>
-                      </Card>
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
         ) : !user ? (
           /* ========================================================
              비로그인 애플 스타일 화면 가득 채운 랜딩페이지 (Apple style aesthetics)
@@ -588,7 +433,7 @@ export default function Page() {
           <div className="flex w-full flex-col items-center justify-center min-h-[75vh] py-8 text-center animate-in fade-in-0 duration-1000 slide-in-from-bottom-8">
             
             {/* 애플 스타일의 미니멀 배지 */}
-            <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700/80 text-[10px] font-semibold tracking-wider uppercase mb-6 select-none animate-pulse">
+            <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700/80 text-[10px] font-semibold tracking-wider uppercase mb-6 select-none animate-pulse">
               Introducing MyLink
             </div>
             
