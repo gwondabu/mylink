@@ -26,6 +26,7 @@ export default function Page() {
   const [newUrl, setNewUrl] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
   // Firestore 데이터 실시간 동기화 및 로드
   useEffect(() => {
@@ -64,9 +65,11 @@ export default function Page() {
           }
         })
         setLinks(fetchedLinks)
+        setIsLoading(false)
       },
       (error) => {
         console.error("Firestore links fetch error: ", error)
+        setIsLoading(false)
       }
     )
 
@@ -213,7 +216,24 @@ export default function Page() {
 
           {/* 링크 버튼 리스트 (Card 컴포넌트 이용) */}
           <div className="flex w-full flex-col gap-4">
-            {links.length === 0 ? (
+            {isLoading ? (
+              <div className="flex w-full flex-col gap-4 animate-pulse">
+                {[1, 2, 3].map((i) => (
+                  <Card key={i} className="overflow-hidden border border-border/40 bg-card/30 backdrop-blur-md">
+                    <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
+                      {/* 왼쪽 Favicon 슬롯 */}
+                      <div className="h-10 w-10 rounded-lg bg-muted border border-border/40" />
+                      {/* 중앙 제목 슬롯 */}
+                      <div className="flex justify-center px-4">
+                        <div className="h-4 bg-muted rounded w-24" />
+                      </div>
+                      {/* 오른쪽 대칭용 슬롯 */}
+                      <div className="w-10 h-10" />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : links.length === 0 ? (
               <Card className="border border-dashed border-border/80 bg-card/30 backdrop-blur-sm">
                 <CardContent className="flex flex-col items-center justify-center p-8 text-center gap-2">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground/60">
@@ -297,7 +317,3 @@ export default function Page() {
     </div>
   )
 }
-
-
-
-
