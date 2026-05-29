@@ -24,16 +24,21 @@ export default function Page() {
 
   const handleAddLink = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newTitle.trim()) {
+    setErrorMessage("")
+
+    const trimmedTitle = newTitle.trim()
+    const trimmedUrl = newUrl.trim()
+
+    if (!trimmedTitle) {
       setErrorMessage("링크 제목을 입력해 주세요.")
       return
     }
-    if (!newUrl.trim()) {
+    if (!trimmedUrl) {
       setErrorMessage("주소를 입력해 주세요.")
       return
     }
 
-    let formattedUrl = newUrl.trim()
+    let formattedUrl = trimmedUrl
     if (!/^https?:\/\//i.test(formattedUrl)) {
       formattedUrl = `https://${formattedUrl}`
     }
@@ -41,11 +46,17 @@ export default function Page() {
     try {
       const urlObj = new URL(formattedUrl)
       const domain = urlObj.hostname
+      
+      if (!domain.includes(".") || domain.length < 4) {
+        setErrorMessage("올바른 도메인 주소 형식이 아닙니다. (예: example.com)")
+        return
+      }
+
       const favicon_url = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
 
       const newLinkItem: LinkItem = {
         id: `link-${Date.now()}`,
-        title: newTitle.trim(),
+        title: trimmedTitle,
         url: formattedUrl,
         favicon_url,
         created_at: new Date().toISOString()
@@ -57,7 +68,7 @@ export default function Page() {
       setErrorMessage("")
       setIsDialogOpen(false)
     } catch (err) {
-      setErrorMessage("올바른 형식의 URL을 입력해 주세요.")
+      setErrorMessage("올바른 형식의 URL을 입력해 주세요. (예: https://example.com)")
     }
   }
 
@@ -147,51 +158,67 @@ export default function Page() {
 
           {/* 링크 버튼 리스트 (Card 컴포넌트 이용) */}
           <div className="flex w-full flex-col gap-4">
-            {links.map((link) => (
-              <a
-                key={link.id}
-                href={link.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group block w-full transition-transform duration-200 active:scale-[0.99]"
-              >
-                <Card className="overflow-hidden border border-border bg-card/60 backdrop-blur-md transition-all duration-300 hover:bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.01] active:border-primary/60">
-                  <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
-                    {/* 왼쪽 Favicon 영역 */}
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/80 border border-border/60 group-hover:bg-primary/10 group-hover:border-primary/20 transition-colors">
-                      {link.favicon_url ? (
-                        <img
-                          src={link.favicon_url}
-                          alt={`${link.title} favicon`}
-                          className="h-5 w-5 object-contain rounded-sm"
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                            const sibling = e.currentTarget.nextElementSibling as HTMLElement;
-                            if (sibling) sibling.style.display = "flex";
-                          }}
-                        />
-                      ) : null}
-                      <div
-                        className="items-center justify-center text-muted-foreground group-hover:text-primary transition-colors"
-                        style={{ display: link.favicon_url ? "none" : "flex" }}
-                      >
-                        <Link2 className="h-4 w-4" />
+            {links.length === 0 ? (
+              <Card className="border border-dashed border-border/80 bg-card/30 backdrop-blur-sm">
+                <CardContent className="flex flex-col items-center justify-center p-8 text-center gap-2">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground/60">
+                    <Link2 className="h-5 w-5" />
+                  </div>
+                  <div className="flex flex-col gap-1 mt-2">
+                    <h3 className="text-sm font-semibold text-foreground">등록된 링크가 없습니다</h3>
+                    <p className="text-xs text-muted-foreground max-w-[240px]">
+                      우측 상단의 추가 버튼을 눌러 나만의 소셜 링크를 등록해 보세요.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              links.map((link) => (
+                <a
+                  key={link.id}
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group block w-full transition-transform duration-200 active:scale-[0.99]"
+                >
+                  <Card className="overflow-hidden border border-border bg-card/60 backdrop-blur-md transition-all duration-300 hover:bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.01] active:border-primary/60">
+                    <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
+                      {/* 왼쪽 Favicon 영역 */}
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/80 border border-border/60 group-hover:bg-primary/10 group-hover:border-primary/20 transition-colors">
+                        {link.favicon_url ? (
+                          <img
+                            src={link.favicon_url}
+                            alt={`${link.title} favicon`}
+                            className="h-5 w-5 object-contain rounded-sm"
+                            onError={(e) => {
+                              e.currentTarget.style.display = "none";
+                              const sibling = e.currentTarget.nextElementSibling as HTMLElement;
+                              if (sibling) sibling.style.display = "flex";
+                            }}
+                          />
+                        ) : null}
+                        <div
+                          className="items-center justify-center text-muted-foreground group-hover:text-primary transition-colors"
+                          style={{ display: link.favicon_url ? "none" : "flex" }}
+                        >
+                          <Link2 className="h-4 w-4" />
+                        </div>
                       </div>
-                    </div>
 
-                    {/* 중앙 정렬된 링크 제목 */}
-                    <div className="text-center min-w-0 px-2">
-                      <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
-                        {link.title}
-                      </h2>
-                    </div>
+                      {/* 중앙 정렬된 링크 제목 */}
+                      <div className="text-center min-w-0 px-2">
+                        <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
+                          {link.title}
+                        </h2>
+                      </div>
 
-                    {/* 오른쪽 대칭용 빈 영역 */}
-                    <div className="w-10 h-10" aria-hidden="true" />
-                  </CardContent>
-                </Card>
-              </a>
-            ))}
+                      {/* 오른쪽 대칭용 빈 영역 */}
+                      <div className="w-10 h-10" aria-hidden="true" />
+                    </CardContent>
+                  </Card>
+                </a>
+              ))
+            )}
           </div>
 
         </div>
