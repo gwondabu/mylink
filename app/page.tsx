@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 
 // Firestore 연동을 위한 모듈 임포트
 import { db } from "@/lib/firebase"
@@ -290,9 +291,9 @@ export default function Page() {
                       type="submit" 
                       disabled={isSubmitting}
                       style={{ backgroundColor: "#5B5FC7" }} 
-                      className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
-                      추가
+                      {isSubmitting ? <Spinner /> : "추가"}
                     </Button>
                   </DialogFooter>
                 </form>
@@ -378,10 +379,10 @@ export default function Page() {
                           <Button
                             type="submit"
                             style={{ backgroundColor: "#5B5FC7" }}
-                            className="text-white hover:opacity-90 active:scale-[0.98] transition-all font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer border-none"
+                            className="text-white hover:opacity-90 active:scale-[0.98] transition-all font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer border-none flex items-center justify-center gap-1.5"
                             disabled={isSubmitting}
                           >
-                            {isSubmitting ? "저장 중..." : "저장"}
+                            {isSubmitting ? <Spinner /> : "저장"}
                           </Button>
                         </div>
                       </form>
@@ -504,10 +505,10 @@ export default function Page() {
                 type="button"
                 variant="destructive"
                 onClick={handleDeleteLink}
-                className="font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer"
+                className="font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer flex items-center justify-center gap-1.5"
                 disabled={isSubmitting}
               >
-                삭제하기
+                {isSubmitting ? <Spinner /> : "삭제하기"}
               </Button>
             </DialogFooter>
           </div>
