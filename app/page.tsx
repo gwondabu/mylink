@@ -16,18 +16,22 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
-// Firestore 연동을 위한 모듈 임포트
-import { db } from "@/lib/firebase"
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, Timestamp, serverTimestamp } from "firebase/firestore"
+// Firebase 및 Auth 관련 모듈 임포트
+import { db, auth } from "@/lib/firebase"
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "firebase/firestore"
+import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth"
 
 export default function Page() {
+  const [user, setUser] = useState<User | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [links, setLinks] = useState<LinkItem[]>([])
+  
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState("")
   const [newUrl, setNewUrl] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
 
   // 수정(인라인 편집)을 위한 로컬 상태들
   const [editingLinkId, setEditingLinkId] = useState<string | null>(null)
@@ -39,12 +43,21 @@ export default function Page() {
   const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
 
+  // Auth 상태 변경 실시간 감시
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser)
+      setAuthLoading(false)
+    })
+    return () => unsubscribe()
+  }, [])
+
   // Firestore에서 일회성 패치 방식으로 데이터를 갱신(Refetch)
-  const fetchLinks = async () => {
+  const fetchLinks = async (uid: string) => {
     setIsLoading(true)
     try {
       const q = query(
-        collection(db, "users/anonymous/links"),
+        collection(db, `users/${uid}/links`),
         orderBy("createdAt", "desc")
       )
       const snapshot = await getDocs(q)
@@ -90,13 +103,35 @@ export default function Page() {
     }
   }
 
-  // 컴포넌트 마운트 시 최초 1회 로드
+  // 로그인 상태 변화에 따른 링크 갱신
   useEffect(() => {
-    fetchLinks()
-  }, [])
+    if (user) {
+      fetchLinks(user.uid)
+    } else {
+      setLinks([])
+    }
+  }, [user])
+
+  const handleLogin = async () => {
+    const provider = new GoogleAuthProvider()
+    try {
+      await signInWithPopup(auth, provider)
+    } catch (error) {
+      console.error("Login failed: ", error)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth)
+    } catch (error) {
+      console.error("Logout failed: ", error)
+    }
+  }
 
   const handleAddLink = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!user) return
     setErrorMessage("")
 
     const trimmedTitle = newTitle.trim()
@@ -128,7 +163,7 @@ export default function Page() {
       setIsSubmitting(true)
 
       // Firestore에 문서 추가
-      await addDoc(collection(db, "users/anonymous/links"), {
+      await addDoc(collection(db, `users/${user.uid}/links`), {
         title: trimmedTitle,
         url: formattedUrl,
         createdAt: serverTimestamp(),
@@ -141,7 +176,7 @@ export default function Page() {
       setIsDialogOpen(false)
       
       // 데이터 갱신
-      await fetchLinks()
+      await fetchLinks(user.uid)
     } catch (err) {
       setErrorMessage("올바른 형식의 URL을 입력해 주세요. (예: https://example.com)")
     } finally {
@@ -151,6 +186,7 @@ export default function Page() {
 
   const handleUpdateLink = async (e: React.FormEvent, id: string) => {
     e.preventDefault()
+    if (!user) return
     setEditError("")
 
     const trimmedTitle = editTitle.trim()
@@ -182,7 +218,7 @@ export default function Page() {
       setIsSubmitting(true)
 
       // Firestore의 문서 업데이트
-      await updateDoc(doc(db, "users/anonymous/links", id), {
+      await updateDoc(doc(db, `users/${user.uid}/links`, id), {
         title: trimmedTitle,
         url: formattedUrl,
         updatedAt: serverTimestamp()
@@ -193,7 +229,7 @@ export default function Page() {
       setEditUrl("")
       
       // 데이터 갱신
-      await fetchLinks()
+      await fetchLinks(user.uid)
     } catch (err) {
       setEditError("올바른 형식의 URL을 입력해 주세요. (예: https://example.com)")
     } finally {
@@ -202,19 +238,19 @@ export default function Page() {
   }
 
   const handleDeleteLink = async () => {
-    if (!linkToDelete) return
+    if (!user || !linkToDelete) return
 
     try {
       setIsSubmitting(true)
 
       // Firestore에서 문서 삭제
-      await deleteDoc(doc(db, "users/anonymous/links", linkToDelete.id))
+      await deleteDoc(doc(db, `users/${user.uid}/links`, linkToDelete.id))
 
       setIsDeleteOpen(false)
       setLinkToDelete(null)
       
       // 데이터 갱신
-      await fetchLinks()
+      await fetchLinks(user.uid)
     } catch (err) {
       console.error("Delete error: ", err)
     } finally {
@@ -223,270 +259,344 @@ export default function Page() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-between bg-background px-4 py-16">
+    <div className="flex min-h-screen flex-col items-center bg-background px-4 pb-16">
       
-      {/* 중앙 메인 콘텐츠 컨테이너 */}
-      <div className="flex w-full max-w-md flex-col items-center gap-8 my-auto">
-        
-        {/* 사용자 프로필 헤더 */}
-        <div className="flex flex-col items-center text-center gap-4">
-          <div className="relative flex h-24 w-24 shrink-0 overflow-hidden rounded-full bg-gradient-to-tr from-primary/80 to-violet-500/80 shadow-lg ring-4 ring-background transition-transform duration-300 hover:scale-105">
-            <span className="flex h-full w-full items-center justify-center rounded-full text-2xl font-bold text-primary-foreground tracking-wider select-none">
-              ML
-            </span>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <h1 className="text-xl font-bold tracking-tight text-foreground">
-              @MyLinkUser
-            </h1>
-            <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed">
-              나의 소중한 소셜 미디어와 링크들을 한 곳에 모았습니다.
-            </p>
-          </div>
-        </div>
-
-        {/* 내 링크 관리 영역 */}
-        <div className="flex w-full flex-col gap-4">
-          
-          <div className="flex items-center justify-between border-b pb-2 border-border/60">
-            <h2 className="text-base font-bold text-foreground">내 링크 관리</h2>
-            
-            {/* 추가 폼 다이얼로그 */}
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger
-                render={
-                  <Button 
-                    style={{ backgroundColor: "#5B5FC7" }} 
-                    className="text-white hover:opacity-90 active:scale-[0.98] transition-all font-semibold rounded-lg text-xs px-3 py-1.5 flex items-center gap-1 shadow-sm h-auto cursor-pointer border-none"
-                  />
-                }
+      {/* 상단 네비게이션 헤더 */}
+      <header className="flex w-full max-w-md items-center justify-between py-4 border-b border-border/40 mb-8 shrink-0">
+        <a href="/" className="flex items-center gap-1.5 text-sm font-extrabold tracking-widest text-foreground hover:opacity-90 select-none">
+          <span>🔗</span>
+          <span>MyLink</span>
+        </a>
+        <div className="flex items-center gap-3">
+          {authLoading ? (
+            <Spinner className="h-4 w-4 text-muted-foreground" />
+          ) : user ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground select-none max-w-[100px] truncate">
+                {user.displayName || user.email?.split("@")[0]}
+              </span>
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={handleLogout}
+                className="text-[10px] px-2 py-1 h-auto rounded-md cursor-pointer font-semibold"
               >
-                <Plus className="h-3.5 w-3.5" />
-                <span>추가</span>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-md">
-                <form onSubmit={handleAddLink} className="flex flex-col gap-4">
-                  <DialogHeader>
-                    <DialogTitle className="text-lg font-bold">내 링크 관리</DialogTitle>
-                  </DialogHeader>
-                  <div className="flex flex-col gap-3 py-2">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground">제목</label>
-                      <Input
-                        value={newTitle}
-                        onChange={(e) => setNewTitle(e.target.value)}
-                        placeholder="링크 제목 입력"
-                        className="rounded-lg"
-                        disabled={isSubmitting}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground">주소</label>
-                      <Input
-                        value={newUrl}
-                        onChange={(e) => setNewUrl(e.target.value)}
-                        placeholder="https://..."
-                        className="rounded-lg"
-                        disabled={isSubmitting}
-                      />
-                    </div>
-                    {errorMessage && (
-                      <p className="text-xs font-medium text-red-500 mt-1">{errorMessage}</p>
-                    )}
-                  </div>
-                  <DialogFooter className="mt-2">
-                    <Button 
-                      type="submit" 
-                      disabled={isSubmitting}
-                      style={{ backgroundColor: "#5B5FC7" }} 
-                      className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {isSubmitting ? <Spinner /> : "추가"}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
-          </div>
+                로그아웃
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={handleLogin}
+              className="text-[10px] px-2 py-1 h-auto rounded-md cursor-pointer font-bold border-primary/30 hover:border-primary/80 transition-all text-primary"
+            >
+              Google 로그인
+            </Button>
+          )}
+        </div>
+      </header>
 
-          {/* 링크 버튼 리스트 (Card 컴포넌트 이용) */}
-          <div className="flex w-full flex-col gap-4">
-            {isLoading ? (
-              <div className="flex w-full flex-col gap-4 animate-pulse">
-                {[1, 2, 3].map((i) => (
-                  <Card key={i} className="overflow-hidden border border-border/40 bg-card/30 backdrop-blur-md">
-                    <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
-                      {/* 왼쪽 Favicon 슬롯 */}
-                      <div className="h-10 w-10 rounded-lg bg-muted border border-border/40" />
-                      {/* 중앙 제목 슬롯 */}
-                      <div className="flex justify-center px-4">
-                        <div className="h-4 bg-muted rounded w-24" />
-                      </div>
-                      {/* 오른쪽 대칭용 슬롯 */}
-                      <div className="w-10 h-10" />
-                    </CardContent>
-                  </Card>
-                ))}
+      {/* 중앙 메인 콘텐츠 컨테이너 */}
+      <div className="flex w-full max-w-md flex-col items-center gap-8 my-auto w-full">
+        
+        {authLoading ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <Spinner className="h-8 w-8 text-primary" />
+            <p className="text-xs text-muted-foreground animate-pulse">사용자 정보 확인 중...</p>
+          </div>
+        ) : !user ? (
+          /* 비로그인 유도 안내 화면 */
+          <div className="flex w-full flex-col gap-6 my-auto items-center text-center py-12">
+            <Card className="border border-border bg-card/40 backdrop-blur-md w-full shadow-lg">
+              <CardContent className="flex flex-col items-center justify-center p-8 gap-6">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <Link2 className="h-8 w-8" />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <h2 className="text-lg font-bold text-foreground">나만의 소셜 링크를 한곳에</h2>
+                  <p className="text-xs text-muted-foreground max-w-[280px] leading-relaxed">
+                    Google 소셜 로그인을 완료하고 나만의 소셜 미디어 및 웹 링크들을 쉽게 관리해 보세요. 이 서비스는 안전한 Firebase 연동으로 보호됩니다.
+                  </p>
+                </div>
+                <Button 
+                  onClick={handleLogin}
+                  style={{ backgroundColor: "#5B5FC7" }}
+                  className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none flex items-center justify-center gap-2 shadow-md shadow-violet-500/10"
+                >
+                  Google 계정으로 시작하기
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
+          /* 로그인 성공 시의 내 링크 관리 화면 */
+          <>
+            {/* 사용자 프로필 헤더 */}
+            <div className="flex flex-col items-center text-center gap-4">
+              <div className="relative flex h-24 w-24 shrink-0 overflow-hidden rounded-full bg-gradient-to-tr from-primary/80 to-violet-500/80 shadow-lg ring-4 ring-background transition-transform duration-300 hover:scale-105">
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt={user.displayName || "Profile Image"} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="flex h-full w-full items-center justify-center rounded-full text-2xl font-bold text-primary-foreground tracking-wider select-none">
+                    {(user.displayName || "ML").slice(0, 2).toUpperCase()}
+                  </span>
+                )}
               </div>
-            ) : links.length === 0 ? (
-              <Card className="border border-dashed border-border/80 bg-card/30 backdrop-blur-sm">
-                <CardContent className="flex flex-col items-center justify-center p-8 text-center gap-2">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground/60">
-                    <Link2 className="h-5 w-5" />
-                  </div>
-                  <div className="flex flex-col gap-1 mt-2">
-                    <h3 className="text-sm font-semibold text-foreground">등록된 링크가 없습니다</h3>
-                    <p className="text-xs text-muted-foreground max-w-[240px]">
-                      우측 상단의 추가 버튼을 눌러 나만의 소셜 링크를 등록해 보세요.
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              links.map((link) => 
-                editingLinkId === link.id ? (
-                  /* 인라인 편집 모드 UI */
-                  <Card key={link.id} className="overflow-hidden border border-primary/50 bg-card/85 backdrop-blur-md transition-all duration-300">
-                    <CardContent className="p-4">
-                      <form onSubmit={(e) => handleUpdateLink(e, link.id)} className="flex flex-col gap-3">
-                        <div className="flex flex-col gap-2">
-                          <div>
-                            <label className="text-[10px] font-semibold text-muted-foreground">제목</label>
-                            <Input
-                              value={editTitle}
-                              onChange={(e) => setEditTitle(e.target.value)}
-                              placeholder="링크 제목 입력"
-                              className="h-9 text-sm rounded-lg mt-0.5"
-                              disabled={isSubmitting}
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-semibold text-muted-foreground">주소</label>
-                            <Input
-                              value={editUrl}
-                              onChange={(e) => setEditUrl(e.target.value)}
-                              placeholder="https://..."
-                              className="h-9 text-sm rounded-lg mt-0.5"
-                              disabled={isSubmitting}
-                            />
-                          </div>
+              <div className="flex flex-col gap-1.5">
+                <h1 className="text-xl font-bold tracking-tight text-foreground">
+                  @{user.displayName || user.email?.split("@")[0]}
+                </h1>
+                <p className="text-xs text-muted-foreground max-w-xs font-normal leading-relaxed">
+                  {user.email}
+                </p>
+              </div>
+            </div>
+
+            {/* 내 링크 관리 영역 */}
+            <div className="flex w-full flex-col gap-4">
+              
+              <div className="flex items-center justify-between border-b pb-2 border-border/60">
+                <h2 className="text-base font-bold text-foreground">내 링크 관리</h2>
+                
+                {/* 추가 폼 다이얼로그 */}
+                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                  <DialogTrigger
+                    render={
+                      <Button 
+                        style={{ backgroundColor: "#5B5FC7" }} 
+                        className="text-white hover:opacity-90 active:scale-[0.98] transition-all font-semibold rounded-lg text-xs px-3 py-1.5 flex items-center gap-1 shadow-sm h-auto cursor-pointer border-none"
+                      />
+                    }
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>추가</span>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md">
+                    <form onSubmit={handleAddLink} className="flex flex-col gap-4">
+                      <DialogHeader>
+                        <DialogTitle className="text-lg font-bold">내 링크 관리</DialogTitle>
+                      </DialogHeader>
+                      <div className="flex flex-col gap-3 py-2">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-semibold text-muted-foreground">제목</label>
+                          <Input
+                            value={newTitle}
+                            onChange={(e) => setNewTitle(e.target.value)}
+                            placeholder="링크 제목 입력"
+                            className="rounded-lg"
+                            disabled={isSubmitting}
+                          />
                         </div>
-                        {editError && (
-                          <p className="text-xs text-red-500 font-medium">{editError}</p>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs font-semibold text-muted-foreground">주소</label>
+                          <Input
+                            value={newUrl}
+                            onChange={(e) => setNewUrl(e.target.value)}
+                            placeholder="https://..."
+                            className="rounded-lg"
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                        {errorMessage && (
+                          <p className="text-xs font-medium text-red-500 mt-1">{errorMessage}</p>
                         )}
-                        <div className="flex gap-2 justify-end">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => setEditingLinkId(null)}
-                            className="text-xs px-3 py-1.5 h-auto rounded-lg cursor-pointer"
-                            disabled={isSubmitting}
-                          >
-                            취소
-                          </Button>
-                          <Button
-                            type="submit"
-                            style={{ backgroundColor: "#5B5FC7" }}
-                            className="text-white hover:opacity-90 active:scale-[0.98] transition-all font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer border-none flex items-center justify-center gap-1.5"
-                            disabled={isSubmitting}
-                          >
-                            {isSubmitting ? <Spinner /> : "저장"}
-                          </Button>
-                        </div>
-                      </form>
+                      </div>
+                      <DialogFooter className="mt-2">
+                        <Button 
+                          type="submit" 
+                          disabled={isSubmitting}
+                          style={{ backgroundColor: "#5B5FC7" }} 
+                          className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          {isSubmitting ? <Spinner /> : "추가"}
+                        </Button>
+                      </DialogFooter>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </div>
+
+              {/* 링크 버튼 리스트 (Card 컴포넌트 이용) */}
+              <div className="flex w-full flex-col gap-4">
+                {isLoading ? (
+                  <div className="flex w-full flex-col gap-4 animate-pulse">
+                    {[1, 2, 3].map((i) => (
+                      <Card key={i} className="overflow-hidden border border-border/40 bg-card/30 backdrop-blur-md">
+                        <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
+                          {/* 왼쪽 Favicon 슬롯 */}
+                          <div className="h-10 w-10 rounded-lg bg-muted border border-border/40" />
+                          {/* 중앙 제목 슬롯 */}
+                          <div className="flex justify-center px-4">
+                            <div className="h-4 bg-muted rounded w-24" />
+                          </div>
+                          {/* 오른쪽 대칭용 슬롯 */}
+                          <div className="w-10 h-10" />
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : links.length === 0 ? (
+                  <Card className="border border-dashed border-border/80 bg-card/30 backdrop-blur-sm">
+                    <CardContent className="flex flex-col items-center justify-center p-8 text-center gap-2">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground/60">
+                        <Link2 className="h-5 w-5" />
+                      </div>
+                      <div className="flex flex-col gap-1 mt-2">
+                        <h3 className="text-sm font-semibold text-foreground">등록된 링크가 없습니다</h3>
+                        <p className="text-xs text-muted-foreground max-w-[240px]">
+                          우측 상단의 추가 버튼을 눌러 나만의 소셜 링크를 등록해 보세요.
+                        </p>
+                      </div>
                     </CardContent>
                   </Card>
                 ) : (
-                  /* 일반 카드 목록 및 수정/삭제 버튼 */
-                  <a
-                    key={link.id}
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group block w-full transition-transform duration-200 active:scale-[0.99]"
-                  >
-                    <Card className="overflow-hidden border border-border bg-card/60 backdrop-blur-md transition-all duration-300 hover:bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.01] active:border-primary/60">
-                      <CardContent className="grid grid-cols-[40px_1fr_80px] items-center p-4">
-                        {/* 왼쪽 Favicon 영역 */}
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/80 border border-border/60 group-hover:bg-primary/10 group-hover:border-primary/20 transition-colors">
-                          {link.favicon_url ? (
-                            <img
-                              src={link.favicon_url}
-                              alt={`${link.title} favicon`}
-                              className="h-5 w-5 object-contain rounded-sm"
-                              onError={(e) => {
-                                e.currentTarget.style.display = "none";
-                                const sibling = e.currentTarget.nextElementSibling as HTMLElement;
-                                if (sibling) sibling.style.display = "flex";
-                              }}
-                            />
-                          ) : null}
-                          <div
-                            className="items-center justify-center text-muted-foreground group-hover:text-primary transition-colors"
-                            style={{ display: link.favicon_url ? "none" : "flex" }}
-                          >
-                            <Link2 className="h-4 w-4" />
-                          </div>
-                        </div>
+                  links.map((link) => 
+                    editingLinkId === link.id ? (
+                      /* 인라인 편집 모드 UI */
+                      <Card key={link.id} className="overflow-hidden border border-primary/50 bg-card/85 backdrop-blur-md transition-all duration-300">
+                        <CardContent className="p-4">
+                          <form onSubmit={(e) => handleUpdateLink(e, link.id)} className="flex flex-col gap-3">
+                            <div className="flex flex-col gap-2">
+                              <div>
+                                <label className="text-[10px] font-semibold text-muted-foreground">제목</label>
+                                <Input
+                                  value={editTitle}
+                                  onChange={(e) => setEditTitle(e.target.value)}
+                                  placeholder="링크 제목 입력"
+                                  className="h-9 text-sm rounded-lg mt-0.5"
+                                  disabled={isSubmitting}
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-semibold text-muted-foreground">주소</label>
+                                <Input
+                                  value={editUrl}
+                                  onChange={(e) => setEditUrl(e.target.value)}
+                                  placeholder="https://..."
+                                  className="h-9 text-sm rounded-lg mt-0.5"
+                                  disabled={isSubmitting}
+                                />
+                              </div>
+                            </div>
+                            {editError && (
+                              <p className="text-xs text-red-500 font-medium">{editError}</p>
+                            )}
+                            <div className="flex gap-2 justify-end">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setEditingLinkId(null)}
+                                className="text-xs px-3 py-1.5 h-auto rounded-lg cursor-pointer"
+                                disabled={isSubmitting}
+                              >
+                                취소
+                              </Button>
+                              <Button
+                                type="submit"
+                                style={{ backgroundColor: "#5B5FC7" }}
+                                className="text-white hover:opacity-90 active:scale-[0.98] transition-all font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer border-none flex items-center justify-center gap-1.5"
+                                disabled={isSubmitting}
+                              >
+                                {isSubmitting ? <Spinner /> : "저장"}
+                              </Button>
+                            </div>
+                          </form>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      /* 일반 카드 목록 및 수정/삭제 버튼 */
+                      <a
+                        key={link.id}
+                        href={link.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group block w-full transition-transform duration-200 active:scale-[0.99]"
+                      >
+                        <Card className="overflow-hidden border border-border bg-card/60 backdrop-blur-md transition-all duration-300 hover:bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.01] active:border-primary/60">
+                          <CardContent className="grid grid-cols-[40px_1fr_80px] items-center p-4">
+                            {/* 왼쪽 Favicon 영역 */}
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/80 border border-border/60 group-hover:bg-primary/10 group-hover:border-primary/20 transition-colors">
+                              {link.favicon_url ? (
+                                <img
+                                  src={link.favicon_url}
+                                  alt={`${link.title} favicon`}
+                                  className="h-5 w-5 object-contain rounded-sm"
+                                  onError={(e) => {
+                                    e.currentTarget.style.display = "none";
+                                    const sibling = e.currentTarget.nextElementSibling as HTMLElement;
+                                    if (sibling) sibling.style.display = "flex";
+                                  }}
+                                />
+                              ) : null}
+                              <div
+                                className="items-center justify-center text-muted-foreground group-hover:text-primary transition-colors"
+                                style={{ display: link.favicon_url ? "none" : "flex" }}
+                              >
+                                <Link2 className="h-4 w-4" />
+                              </div>
+                            </div>
 
-                        {/* 중앙 정렬된 링크 제목 */}
-                        <div className="text-center min-w-0 px-2 flex flex-col gap-0.5">
-                          <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
-                            {link.title}
-                          </h2>
-                          {link.updated_at && (
-                            <p className="text-[10px] text-muted-foreground/60 select-none">
-                              수정됨: {new Date(link.updated_at).toLocaleString("ko-KR", {
-                                year: "numeric",
-                                month: "2-digit",
-                                day: "2-digit",
-                                hour: "2-digit",
-                                minute: "2-digit"
-                              })}
-                            </p>
-                          )}
-                        </div>
+                            {/* 중앙 정렬된 링크 제목 */}
+                            <div className="text-center min-w-0 px-2 flex flex-col gap-0.5">
+                              <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
+                                {link.title}
+                              </h2>
+                              {link.updated_at && (
+                                <p className="text-[10px] text-muted-foreground/60 select-none">
+                                  수정됨: {new Date(link.updated_at).toLocaleString("ko-KR", {
+                                    year: "numeric",
+                                    month: "2-digit",
+                                    day: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit"
+                                  })}
+                                </p>
+                              )}
+                            </div>
 
-                        {/* 오른쪽 수정/삭제 버튼 영역 */}
-                        <div className="flex items-center gap-1.5 justify-end z-10">
-                          <Button
-                            size="icon-sm"
-                            variant="ghost"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              setEditingLinkId(link.id)
-                              setEditTitle(link.title)
-                              setEditUrl(link.url)
-                              setEditError("")
-                            }}
-                            className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-muted cursor-pointer"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            size="icon-sm"
-                            variant="ghost"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              setLinkToDelete(link)
-                              setIsDeleteOpen(true)
-                            }}
-                            className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 cursor-pointer"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </a>
-                )
-              )
-            )}
-          </div>
+                            {/* 오른쪽 수정/삭제 버튼 영역 */}
+                            <div className="flex items-center gap-1.5 justify-end z-10">
+                              <Button
+                                size="icon-sm"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  setEditingLinkId(link.id)
+                                  setEditTitle(link.title)
+                                  setEditUrl(link.url)
+                                  setEditError("")
+                                }}
+                                className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-muted cursor-pointer"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon-sm"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  setLinkToDelete(link)
+                                  setIsDeleteOpen(true)
+                                }}
+                                className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 cursor-pointer"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </a>
+                    )
+                  )
+                )}
+              </div>
 
-        </div>
+            </div>
+          </>
+        )}
 
       </div>
 
