@@ -22,7 +22,7 @@ export default function StatsPage() {
   // 1. 로그인 여부 확인 및 리다이렉트
   useEffect(() => {
     if (!authLoading && !user) {
-      router.push("/")
+      router.replace("/")
     }
   }, [user, authLoading, router])
 

@@ -24,7 +24,7 @@ import { Header } from "@/components/header"
 // Firestore 및 Auth 임포트
 import { db, auth } from "@/lib/firebase"
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp } from "firebase/firestore"
-import { signInWithPopup, GoogleAuthProvider } from "firebase/auth"
+import { signInWithPopup, signInWithRedirect, GoogleAuthProvider } from "firebase/auth"
 
 // TanStack Query 임포트
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
@@ -231,11 +231,15 @@ export default function Page() {
     try {
       await signInWithPopup(auth, provider)
     } catch (error: any) {
-      if (
-        error.code === "auth/cancelled-popup-request" ||
-        error.code === "auth/popup-closed-by-user"
-      ) {
-        console.warn("Login popup was closed or cancelled:", error.message)
+      if (error.code === "auth/popup-blocked" || error.code === "auth/cancelled-popup-request") {
+        console.warn("Popup blocked or cancelled, trying redirect...")
+        try {
+          await signInWithRedirect(auth, provider)
+        } catch (redirectError) {
+          console.error("Redirect login failed: ", redirectError)
+        }
+      } else if (error.code === "auth/popup-closed-by-user") {
+        console.warn("Login popup was closed by user")
       } else {
         console.error("Login failed: ", error)
       }

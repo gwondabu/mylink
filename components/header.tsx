@@ -1,8 +1,9 @@
 "use client"
 
+import { useState } from "react"
 import { useUser } from "@/hooks/use-user"
 import { auth } from "@/lib/firebase"
-import { signInWithPopup, signOut, GoogleAuthProvider } from "firebase/auth"
+import { signInWithPopup, signInWithRedirect, signOut, GoogleAuthProvider } from "firebase/auth"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
@@ -17,13 +18,29 @@ import { ExternalLink, Copy, LogOut } from "lucide-react"
 
 export function Header() {
   const { user, profile, loading } = useUser()
+  const [isLoggingIn, setIsLoggingIn] = useState(false)
 
   const handleLogin = async () => {
+    if (isLoggingIn) return
+    setIsLoggingIn(true)
     const provider = new GoogleAuthProvider()
     try {
       await signInWithPopup(auth, provider)
-    } catch (error) {
-      console.error("Login failed: ", error)
+    } catch (error: any) {
+      if (error.code === "auth/popup-blocked" || error.code === "auth/cancelled-popup-request") {
+        console.warn("Popup blocked or cancelled in Header, trying redirect...")
+        try {
+          await signInWithRedirect(auth, provider)
+        } catch (redirectError) {
+          console.error("Redirect login failed in Header: ", redirectError)
+        }
+      } else if (error.code === "auth/popup-closed-by-user") {
+        console.warn("Login popup was closed by user in Header")
+      } else {
+        console.error("Login failed in Header: ", error)
+      }
+    } finally {
+      setIsLoggingIn(false)
     }
   }
 
@@ -121,9 +138,10 @@ export function Header() {
             variant="outline"
             size="xs"
             onClick={handleLogin}
-            className="text-[10px] px-2 py-1 h-auto rounded-md cursor-pointer font-bold border-primary/30 hover:border-primary/80 transition-all text-primary"
+            disabled={isLoggingIn}
+            className="text-[10px] px-2 py-1 h-auto rounded-md cursor-pointer font-bold border-primary/30 hover:border-primary/80 transition-all text-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
           >
-            Google 로그인
+            {isLoggingIn ? <Spinner className="h-3 w-3" /> : "Google 로그인"}
           </Button>
         )}
       </div>
