@@ -292,7 +292,7 @@ export default function Page() {
                       style={{ backgroundColor: "#5B5FC7" }} 
                       className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {isSubmitting ? "추가 중..." : "추가"}
+                      추가
                     </Button>
                   </DialogFooter>
                 </form>
@@ -507,7 +507,7 @@ export default function Page() {
                 className="font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer"
                 disabled={isSubmitting}
               >
-                {isSubmitting ? "삭제 중..." : "삭제하기"}
+                삭제하기
               </Button>
             </DialogFooter>
           </div>
