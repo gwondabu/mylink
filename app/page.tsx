@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button"
 
 // Firestore 연동을 위한 모듈 임포트
 import { db } from "@/lib/firebase"
-import { collection, addDoc, onSnapshot, query, orderBy, Timestamp } from "firebase/firestore"
+import { collection, addDoc, onSnapshot, query, orderBy, Timestamp, serverTimestamp } from "firebase/firestore"
 
 export default function Page() {
   const [links, setLinks] = useState<LinkItem[]>([])
@@ -31,7 +31,7 @@ export default function Page() {
   useEffect(() => {
     const q = query(
       collection(db, "users/anonymous/links"),
-      orderBy("created_at", "desc")
+      orderBy("createdAt", "desc")
     )
     
     const unsubscribe = onSnapshot(
@@ -40,16 +40,26 @@ export default function Page() {
         const fetchedLinks: LinkItem[] = snapshot.docs.map((doc) => {
           const data = doc.data()
           let createdAtStr = new Date().toISOString()
-          if (data.created_at) {
-            createdAtStr = typeof data.created_at.toDate === "function"
-              ? data.created_at.toDate().toISOString()
-              : new Date(data.created_at).toISOString()
+          if (data.createdAt) {
+            createdAtStr = typeof data.createdAt.toDate === "function"
+              ? data.createdAt.toDate().toISOString()
+              : new Date(data.createdAt).toISOString()
           }
+
+          // DB 필드에 저장되지 않는 파비콘 URL을 입력된 url을 통해 동적 추출
+          let favicon_url = ""
+          try {
+            const urlObj = new URL(data.url || "")
+            favicon_url = `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=64`
+          } catch (err) {
+            // URL 파싱 에러 시 빈 값 유지
+          }
+
           return {
             id: doc.id,
             title: data.title || "",
             url: data.url || "",
-            favicon_url: data.favicon_url || "",
+            favicon_url,
             created_at: createdAtStr
           }
         })
@@ -95,14 +105,12 @@ export default function Page() {
 
       setIsSubmitting(true)
 
-      const favicon_url = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
-
       // Firestore에 문서 추가
       await addDoc(collection(db, "users/anonymous/links"), {
         title: trimmedTitle,
         url: formattedUrl,
-        favicon_url,
-        created_at: Timestamp.now()
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       })
 
       setNewTitle("")
