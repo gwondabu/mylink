@@ -26,9 +26,12 @@ import { db, auth } from "@/lib/firebase"
 import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp } from "firebase/firestore"
 import { signInWithPopup, GoogleAuthProvider } from "firebase/auth"
 
+// TanStack Query 임포트
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+
 export default function Page() {
   const { user, profile, loading: authLoading } = useUser()
-  const [links, setLinks] = useState<LinkItem[]>([])
+  const queryClient = useQueryClient()
   
   // 미리보기/조회 모드 상태
   const [previewUid, setPreviewUid] = useState<string | null>(null)
@@ -40,8 +43,6 @@ export default function Page() {
   const [newTitle, setNewTitle] = useState("")
   const [newUrl, setNewUrl] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
 
   // 수정(인라인 편집)을 위한 로컬 상태들
   const [editingLinkId, setEditingLinkId] = useState<string | null>(null)
@@ -79,29 +80,30 @@ export default function Page() {
   // 조회 대상 UID 정보 로드
   useEffect(() => {
     if (previewUid) {
-      // 1. 해당 유저의 프로필 fetch
+      // 해당 유저의 프로필 fetch
       const docRef = doc(db, "users", previewUid)
       getDoc(docRef).then((docSnap) => {
         if (docSnap.exists()) {
           setPreviewProfile(docSnap.data() as UserProfile)
         }
       }).catch((err) => console.error("Preview profile fetch error:", err))
-
-      // 2. 해당 유저의 링크 fetch
-      fetchLinks(previewUid)
     }
   }, [previewUid])
 
-  // Firestore에서 일회성 패치 방식으로 데이터를 갱신(Refetch)
-  const fetchLinks = async (uid: string) => {
-    setIsLoading(true)
-    try {
+  // 현재 데이터 소유자 UID 정의
+  const targetUid = previewUid || user?.uid
+
+  // 1. [TanStack Query] 링크 리스트 조회 (staleTime 5분 지정, enabled 제어)
+  const { data: links = [], isLoading } = useQuery<LinkItem[]>({
+    queryKey: ["links", targetUid],
+    queryFn: async () => {
+      if (!targetUid) return []
       const q = query(
-        collection(db, `users/${uid}/links`),
+        collection(db, `users/${targetUid}/links`),
         orderBy("createdAt", "desc")
       )
       const snapshot = await getDocs(q)
-      const fetchedLinks: LinkItem[] = snapshot.docs.map((doc) => {
+      return snapshot.docs.map((doc) => {
         const data = doc.data()
         let createdAtStr = new Date().toISOString()
         if (data.createdAt) {
@@ -117,14 +119,11 @@ export default function Page() {
             : new Date(data.updatedAt).toISOString()
         }
 
-        // DB에 저장되지 않는 파비콘 URL을 입력된 url을 통해 동적 추출
         let favicon_url = ""
         try {
           const urlObj = new URL(data.url || "")
           favicon_url = `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=64`
-        } catch (err) {
-          // URL 파싱 에러 대응
-        }
+        } catch (err) {}
 
         return {
           id: doc.id,
@@ -135,24 +134,127 @@ export default function Page() {
           updated_at: updatedAtStr
         }
       })
-      setLinks(fetchedLinks)
-    } catch (error) {
-      console.error("Firestore links fetch error: ", error)
-    } finally {
-      setIsLoading(false)
-    }
-  }
+    },
+    enabled: !!targetUid
+  })
 
-  // 로그인 상태 변화에 따른 링크 갱신 (미리보기 모드가 아닐 때만 동작)
-  useEffect(() => {
-    if (!previewUid) {
-      if (user) {
-        fetchLinks(user.uid)
-      } else {
-        setLinks([])
+  // 2. [TanStack Query Mutation] 링크 추가 (낙관적 업데이트 적용)
+  const addMutation = useMutation({
+    mutationFn: async (newLink: { title: string; url: string }) => {
+      if (!user) throw new Error("Unauthenticated")
+      return addDoc(collection(db, `users/${user.uid}/links`), {
+        title: newLink.title,
+        url: newLink.url,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      })
+    },
+    onMutate: async (newLink) => {
+      await queryClient.cancelQueries({ queryKey: ["links", user?.uid] })
+      const previousLinks = queryClient.getQueryData<LinkItem[]>(["links", user?.uid])
+
+      let favicon_url = ""
+      try {
+        const urlObj = new URL(newLink.url)
+        favicon_url = `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=64`
+      } catch (err) {}
+
+      const tempId = `temp-${Date.now()}`
+      const optimisticLink: LinkItem = {
+        id: tempId,
+        title: newLink.title,
+        url: newLink.url,
+        favicon_url,
+        created_at: new Date().toISOString()
       }
+
+      queryClient.setQueryData<LinkItem[]>(["links", user?.uid], (old) => [
+        optimisticLink,
+        ...(old || [])
+      ])
+
+      return { previousLinks }
+    },
+    onError: (err, newLink, context) => {
+      if (context?.previousLinks) {
+        queryClient.setQueryData(["links", user?.uid], context.previousLinks)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["links", user?.uid] })
     }
-  }, [user, previewUid])
+  })
+
+  // 3. [TanStack Query Mutation] 링크 수정 (낙관적 업데이트 적용)
+  const updateMutation = useMutation({
+    mutationFn: async (editData: { id: string; title: string; url: string }) => {
+      if (!user) throw new Error("Unauthenticated")
+      return updateDoc(doc(db, `users/${user.uid}/links`, editData.id), {
+        title: editData.title,
+        url: editData.url,
+        updatedAt: serverTimestamp()
+      })
+    },
+    onMutate: async (editData) => {
+      await queryClient.cancelQueries({ queryKey: ["links", user?.uid] })
+      const previousLinks = queryClient.getQueryData<LinkItem[]>(["links", user?.uid])
+
+      queryClient.setQueryData<LinkItem[]>(["links", user?.uid], (old) => {
+        return (old || []).map((link) => {
+          if (link.id === editData.id) {
+            let favicon_url = link.favicon_url
+            try {
+              const urlObj = new URL(editData.url)
+              favicon_url = `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=64`
+            } catch (err) {}
+            return {
+              ...link,
+              title: editData.title,
+              url: editData.url,
+              favicon_url
+            }
+          }
+          return link
+        })
+      })
+
+      return { previousLinks }
+    },
+    onError: (err, editData, context) => {
+      if (context?.previousLinks) {
+        queryClient.setQueryData(["links", user?.uid], context.previousLinks)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["links", user?.uid] })
+    }
+  })
+
+  // 4. [TanStack Query Mutation] 링크 삭제 (낙관적 업데이트 적용)
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      if (!user) throw new Error("Unauthenticated")
+      return deleteDoc(doc(db, `users/${user.uid}/links`, id))
+    },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ["links", user?.uid] })
+      const previousLinks = queryClient.getQueryData<LinkItem[]>(["links", user?.uid])
+
+      queryClient.setQueryData<LinkItem[]>(["links", user?.uid], (old) => {
+        return (old || []).filter((link) => link.id !== id)
+      })
+
+      return { previousLinks }
+    },
+    onError: (err, id, context) => {
+      if (context?.previousLinks) {
+        queryClient.setQueryData(["links", user?.uid], context.previousLinks)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["links", user?.uid] })
+    }
+  })
 
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider()
@@ -194,27 +296,15 @@ export default function Page() {
         return
       }
 
-      setIsSubmitting(true)
-
-      // Firestore에 문서 추가
-      await addDoc(collection(db, `users/${user.uid}/links`), {
-        title: trimmedTitle,
-        url: formattedUrl,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      })
+      // 리액트 쿼리 뮤테이션 실행
+      await addMutation.mutateAsync({ title: trimmedTitle, url: formattedUrl })
 
       setNewTitle("")
       setNewUrl("")
       setErrorMessage("")
       setIsDialogOpen(false)
-      
-      // 데이터 갱신
-      await fetchLinks(user.uid)
     } catch (err) {
       setErrorMessage("올바른 형식의 URL을 입력해 주세요. (예: https://example.com)")
-    } finally {
-      setIsSubmitting(false)
     }
   }
 
@@ -249,25 +339,14 @@ export default function Page() {
         return
       }
 
-      setIsSubmitting(true)
-
-      // Firestore의 문서 업데이트
-      await updateDoc(doc(db, `users/${user.uid}/links`, id), {
-        title: trimmedTitle,
-        url: formattedUrl,
-        updatedAt: serverTimestamp()
-      })
+      // 리액트 쿼리 뮤테이션 실행
+      await updateMutation.mutateAsync({ id, title: trimmedTitle, url: formattedUrl })
 
       setEditingLinkId(null)
       setEditTitle("")
       setEditUrl("")
-      
-      // 데이터 갱신
-      await fetchLinks(user.uid)
     } catch (err) {
       setEditError("올바른 형식의 URL을 입력해 주세요. (예: https://example.com)")
-    } finally {
-      setIsSubmitting(false)
     }
   }
 
@@ -298,7 +377,7 @@ export default function Page() {
       return
     }
 
-    // 2. [최적화] 변경된 사항이 없으면 Firestore 업데이트 없이 종료
+    // 2. 변경 사항이 없으면 Firestore 업데이트 없이 종료 (최적화)
     if (
       trimmedUsername === profile.username &&
       trimmedDisplayName === profile.displayName &&
@@ -343,20 +422,12 @@ export default function Page() {
     if (!user || !linkToDelete) return
 
     try {
-      setIsSubmitting(true)
-
-      // Firestore에서 문서 삭제
-      await deleteDoc(doc(db, `users/${user.uid}/links`, linkToDelete.id))
-
+      // 리액트 쿼리 뮤테이션 실행
+      await deleteMutation.mutateAsync(linkToDelete.id)
       setIsDeleteOpen(false)
       setLinkToDelete(null)
-      
-      // 데이터 갱신
-      await fetchLinks(user.uid)
     } catch (err) {
       console.error("Delete error: ", err)
-    } finally {
-      setIsSubmitting(false)
     }
   }
 
@@ -377,6 +448,9 @@ export default function Page() {
 
   // 미리보기 모드인지 판별 (URL에 preview=true가 있고, 수정 권한이 없는 경우)
   const isPreviewMode = isPreview || (previewUid !== null && (!user || user.uid !== previewUid))
+
+  // 로딩 상태 통합 (리액트 쿼리 Mutation 로딩 상태 포함)
+  const isMutating = addMutation.isPending || updateMutation.isPending || deleteMutation.isPending || isSubmitting
 
   return (
     <div className="relative flex min-h-screen flex-col items-center bg-background px-4 pb-16 overflow-hidden">
@@ -432,15 +506,15 @@ export default function Page() {
                 <h1 className="text-xl font-bold tracking-tight text-foreground">
                   {previewProfile?.displayName || "UserName"}
                 </h1>
-                <p className="text-xs font-mono font-semibold text-primary bg-primary/5 px-2.5 py-0.5 rounded-full border border-primary/10 select-none">
+                <p className="text-xs font-mono font-semibold text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 rounded-full border border-zinc-200 dark:border-zinc-700 select-none">
                   @{previewProfile?.username || "username"}
                 </p>
                 {previewProfile?.profile_bio ? (
-                  <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-2 p-3 bg-card/60 backdrop-blur-md rounded-lg border border-border/40 w-full text-center">
+                  <p className="text-sm text-zinc-600 dark:text-zinc-300 max-w-xs font-normal leading-relaxed mt-2 p-3 bg-zinc-50/60 dark:bg-zinc-900/60 backdrop-blur-md rounded-lg border border-zinc-200 dark:border-zinc-850 w-full text-center">
                     {previewProfile.profile_bio}
                   </p>
                 ) : (
-                  <p className="text-sm text-muted-foreground/60 max-w-xs font-normal leading-relaxed mt-1">
+                  <p className="text-sm text-zinc-400 dark:text-zinc-550 max-w-xs font-normal leading-relaxed mt-1">
                     나의 소중한 소셜 미디어와 링크들을 한 곳에 모았습니다.
                   </p>
                 )}
@@ -473,9 +547,9 @@ export default function Page() {
                       rel="noopener noreferrer"
                       className="group block w-full transition-transform duration-200 active:scale-[0.99]"
                     >
-                      <Card className="overflow-hidden border border-border bg-card/60 backdrop-blur-md transition-all duration-300 hover:bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.01]">
+                      <Card className="overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 bg-white/40 dark:bg-zinc-900/40 backdrop-blur-md transition-all duration-300 hover:bg-white dark:hover:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-md hover:scale-[1.01]">
                         <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/85 border border-border/60 group-hover:bg-primary/10 group-hover:border-primary/20 transition-colors">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200/60 dark:border-zinc-700/60 group-hover:bg-zinc-200 dark:group-hover:bg-zinc-700 transition-colors">
                             {link.favicon_url ? (
                               <img
                                 src={link.favicon_url}
@@ -488,16 +562,16 @@ export default function Page() {
                                 }}
                               />
                             ) : null}
-                            <div className="items-center justify-center text-muted-foreground group-hover:text-primary" style={{ display: link.favicon_url ? "none" : "flex" }}>
+                            <div className="items-center justify-center text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-650" style={{ display: link.favicon_url ? "none" : "flex" }}>
                               <Link2 className="h-4 w-4" />
                             </div>
                           </div>
                           <div className="text-center min-w-0 px-2">
-                            <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
+                            <h2 className="text-sm font-semibold tracking-wide text-zinc-800 dark:text-zinc-250 truncate">
                               {link.title}
                             </h2>
                           </div>
-                          <div className="w-10 h-10" /> {/* 우측 간격 맞춤용 공백 */}
+                          <div className="w-10 h-10" />
                         </CardContent>
                       </Card>
                     </a>
@@ -543,36 +617,38 @@ export default function Page() {
           </div>
         ) : (
           /* ========================================================
-             로그인 성공 시의 내 링크 관리 대시보드 화면
+             로그인 성공 시의 내 링크 관리 대시보드 화면 (애플 스타일 리팩토링)
              ======================================================== */
-          <>
+          <div className="flex w-full flex-col gap-8 w-full animate-fade-in">
             {/* 사용자 프로필 헤더 */}
-            <div className="flex flex-col items-center text-center gap-4 animate-fade-in w-full">
+            <div className="flex flex-col items-center text-center gap-4 w-full">
               <Avatar size="lg" className="h-24 w-24 ring-4 ring-background shadow-lg transition-transform duration-300 hover:scale-105">
                 <AvatarImage src={profile?.profile_image_url || user.photoURL || undefined} alt="Profile avatar image" />
-                <AvatarFallback className="text-2xl font-bold bg-gradient-to-tr from-primary/80 to-violet-500/80 text-white">{getInitials()}</AvatarFallback>
+                <AvatarFallback className="text-2xl font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200">{getInitials()}</AvatarFallback>
               </Avatar>
               
-              <div className="flex flex-col gap-1.5 items-center w-full">
-                <h1 className="text-xl font-bold tracking-tight text-foreground">
-                  {profile?.displayName || user.displayName || user.email?.split("@")[0]}
-                </h1>
-                
-                {/* username 출력 영역 (@ 기호 닉네임에서 분리) */}
-                <p className="text-xs font-mono font-semibold text-primary bg-primary/5 px-2.5 py-0.5 rounded-full border border-primary/10 select-none">
-                  @{profile?.username || user.email?.split("@")[0]}
-                </p>
+              <div className="flex flex-col gap-2.5 items-center w-full">
+                <div className="flex flex-col gap-1 items-center">
+                  <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+                    {profile?.displayName || user.displayName || user.email?.split("@")[0]}
+                  </h1>
+                  
+                  {/* username 출력 영역 (@ 기호 닉네임에서 분리, 애플 감성 배지) */}
+                  <p className="text-[11px] font-mono font-semibold text-zinc-600 dark:text-zinc-350 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 rounded-full border border-zinc-200 dark:border-zinc-700/80 select-none">
+                    @{profile?.username || user.email?.split("@")[0]}
+                  </p>
+                </div>
 
-                <p className="text-[10px] text-muted-foreground/60 select-none">
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-550 select-none">
                   {profile?.email || user.email}
                 </p>
 
                 {profile?.profile_bio ? (
-                  <p className="text-sm text-muted-foreground max-w-xs font-normal leading-relaxed mt-2 p-3 bg-muted/40 rounded-lg border border-border/40 w-full text-center">
+                  <p className="text-xs text-zinc-600 dark:text-zinc-300 max-w-xs font-normal leading-relaxed mt-1 p-3.5 bg-zinc-50/60 dark:bg-zinc-900/60 rounded-xl border border-zinc-200 dark:border-zinc-800/80 w-full text-center shadow-xs">
                     {profile.profile_bio}
                   </p>
                 ) : (
-                  <p className="text-sm text-muted-foreground/60 max-w-xs font-normal leading-relaxed mt-1">
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 max-w-xs font-normal leading-relaxed mt-1">
                     나의 소중한 소셜 미디어와 링크들을 한 곳에 모았습니다.
                   </p>
                 )}
@@ -590,7 +666,7 @@ export default function Page() {
                         }}
                         variant="outline"
                         size="xs"
-                        className="mt-3 text-[11px] rounded-lg h-7 px-3 cursor-pointer flex items-center gap-1.5 hover:bg-muted"
+                        className="mt-2 text-[11px] rounded-lg h-7 px-3.5 cursor-pointer flex items-center gap-1.5 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors shadow-xs"
                       />
                     }
                   >
@@ -610,7 +686,7 @@ export default function Page() {
                             onChange={(e) => setProfileUsername(e.target.value)}
                             placeholder="사용자 고유 아이디 (영문 소문자/숫자/_/-)"
                             className="rounded-lg text-xs"
-                            disabled={isSubmitting}
+                            disabled={isMutating}
                           />
                         </div>
                         <div className="flex flex-col gap-1.5">
@@ -620,7 +696,7 @@ export default function Page() {
                             onChange={(e) => setProfileDisplayName(e.target.value)}
                             placeholder="노출될 실명 또는 닉네임"
                             className="rounded-lg text-xs"
-                            disabled={isSubmitting}
+                            disabled={isMutating}
                           />
                         </div>
                         <div className="flex flex-col gap-1.5">
@@ -631,7 +707,7 @@ export default function Page() {
                             placeholder="나를 설명하는 한 줄 문구 (최대 80자)"
                             maxLength={80}
                             className="rounded-lg text-xs"
-                            disabled={isSubmitting}
+                            disabled={isMutating}
                           />
                         </div>
                         {profileError && (
@@ -641,11 +717,11 @@ export default function Page() {
                       <DialogFooter className="mt-2">
                         <Button 
                           type="submit" 
-                          disabled={isSubmitting}
+                          disabled={isMutating}
                           style={{ backgroundColor: "#5B5FC7" }} 
                           className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
-                          {isSubmitting ? <Spinner /> : "저장"}
+                          {isMutating ? <Spinner /> : "저장"}
                         </Button>
                       </DialogFooter>
                     </form>
@@ -654,11 +730,11 @@ export default function Page() {
               </div>
             </div>
 
-            {/* 내 링크 관리 영역 */}
+            {/* 내 링크 관리 영역 (애플 디자인 스타일) */}
             <div className="flex w-full flex-col gap-4">
               
-              <div className="flex items-center justify-between border-b pb-2 border-border/60">
-                <h2 className="text-base font-bold text-foreground">내 링크 관리</h2>
+              <div className="flex items-center justify-between border-b pb-2 border-zinc-200/80 dark:border-zinc-800/80">
+                <h2 className="text-[14px] font-bold text-zinc-800 dark:text-zinc-200">내 링크 목록</h2>
                 
                 {/* 추가 폼 다이얼로그 */}
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -686,7 +762,7 @@ export default function Page() {
                             onChange={(e) => setNewTitle(e.target.value)}
                             placeholder="링크 제목 입력"
                             className="rounded-lg"
-                            disabled={isSubmitting}
+                            disabled={isMutating}
                           />
                         </div>
                         <div className="flex flex-col gap-1.5">
@@ -696,7 +772,7 @@ export default function Page() {
                             onChange={(e) => setNewUrl(e.target.value)}
                             placeholder="https://..."
                             className="rounded-lg"
-                            disabled={isSubmitting}
+                            disabled={isMutating}
                           />
                         </div>
                         {errorMessage && (
@@ -706,11 +782,11 @@ export default function Page() {
                       <DialogFooter className="mt-2">
                         <Button 
                           type="submit" 
-                          disabled={isSubmitting}
+                          disabled={isMutating}
                           style={{ backgroundColor: "#5B5FC7" }} 
                           className="w-full text-white hover:opacity-90 active:scale-[0.98] transition-all py-5 font-semibold rounded-lg cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
-                          {isSubmitting ? <Spinner /> : "추가"}
+                          {isMutating ? <Spinner /> : "추가"}
                         </Button>
                       </DialogFooter>
                     </form>
@@ -718,7 +794,7 @@ export default function Page() {
                 </Dialog>
               </div>
 
-              {/* 링크 버튼 리스트 (Card 컴포넌트 이용) */}
+              {/* 링크 버튼 리스트 */}
               <div className="flex w-full flex-col gap-4">
                 {isLoading ? (
                   <div className="flex w-full flex-col gap-4 animate-pulse">
@@ -738,14 +814,14 @@ export default function Page() {
                     ))}
                   </div>
                 ) : links.length === 0 ? (
-                  <Card className="border border-dashed border-border/80 bg-card/30 backdrop-blur-sm">
+                  <Card className="border border-dashed border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/20 dark:bg-zinc-900/10">
                     <CardContent className="flex flex-col items-center justify-center p-8 text-center gap-2">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground/60">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500">
                         <Link2 className="h-5 w-5" />
                       </div>
                       <div className="flex flex-col gap-1 mt-2">
-                        <h3 className="text-sm font-semibold text-foreground">등록된 링크가 없습니다</h3>
-                        <p className="text-xs text-muted-foreground max-w-[240px]">
+                        <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">등록된 링크가 없습니다</h3>
+                        <p className="text-xs text-zinc-400 dark:text-zinc-550 max-w-[240px]">
                           우측 상단의 추가 버튼을 눌러 나만의 소셜 링크를 등록해 보세요.
                         </p>
                       </div>
@@ -755,7 +831,7 @@ export default function Page() {
                   links.map((link) => 
                     editingLinkId === link.id ? (
                       /* 인라인 편집 모드 UI */
-                      <Card key={link.id} className="overflow-hidden border border-primary/50 bg-card/85 backdrop-blur-md transition-all duration-300">
+                      <Card key={link.id} className="overflow-hidden border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 transition-all duration-300">
                         <CardContent className="p-4">
                           <form onSubmit={(e) => handleUpdateLink(e, link.id)} className="flex flex-col gap-3">
                             <div className="flex flex-col gap-2">
@@ -766,7 +842,7 @@ export default function Page() {
                                   onChange={(e) => setEditTitle(e.target.value)}
                                   placeholder="링크 제목 입력"
                                   className="h-9 text-sm rounded-lg mt-0.5"
-                                  disabled={isSubmitting}
+                                  disabled={isMutating}
                                 />
                               </div>
                               <div>
@@ -776,7 +852,7 @@ export default function Page() {
                                   onChange={(e) => setEditUrl(e.target.value)}
                                   placeholder="https://..."
                                   className="h-9 text-sm rounded-lg mt-0.5"
-                                  disabled={isSubmitting}
+                                  disabled={isMutating}
                                 />
                               </div>
                             </div>
@@ -788,8 +864,8 @@ export default function Page() {
                                 type="button"
                                 variant="outline"
                                 onClick={() => setEditingLinkId(null)}
-                                className="text-xs px-3 py-1.5 h-auto rounded-lg cursor-pointer"
-                                disabled={isSubmitting}
+                                className="text-xs px-3 py-1.5 h-auto rounded-lg cursor-pointer border-zinc-200 dark:border-zinc-800"
+                                disabled={isMutating}
                               >
                                 취소
                               </Button>
@@ -797,16 +873,16 @@ export default function Page() {
                                 type="submit"
                                 style={{ backgroundColor: "#5B5FC7" }}
                                 className="text-white hover:opacity-90 active:scale-[0.98] transition-all font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer border-none flex items-center justify-center gap-1.5"
-                                disabled={isSubmitting}
+                                disabled={isMutating}
                               >
-                                {isSubmitting ? <Spinner /> : "저장"}
+                                {isMutating ? <Spinner /> : "저장"}
                               </Button>
                             </div>
                           </form>
                         </CardContent>
                       </Card>
                     ) : (
-                      /* 일반 카드 목록 및 수정/삭제 버튼 */
+                      /* 일반 카드 목록 및 수정/삭제 버튼 (애플 스타일의 모노톤 적용) */
                       <a
                         key={link.id}
                         href={link.url}
@@ -814,10 +890,10 @@ export default function Page() {
                         rel="noopener noreferrer"
                         className="group block w-full transition-transform duration-200 active:scale-[0.99]"
                       >
-                        <Card className="overflow-hidden border border-border bg-card/60 backdrop-blur-md transition-all duration-300 hover:bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.01] active:border-primary/60">
+                        <Card className="overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 bg-white/40 dark:bg-zinc-900/40 backdrop-blur-md transition-all duration-300 hover:bg-white dark:hover:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-sm">
                           <CardContent className="grid grid-cols-[40px_1fr_80px] items-center p-4">
                             {/* 왼쪽 Favicon 영역 */}
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/80 border border-border/60 group-hover:bg-primary/10 group-hover:border-primary/20 transition-colors">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200/60 dark:border-zinc-750 group-hover:bg-zinc-200 dark:group-hover:bg-zinc-700 transition-colors">
                               {link.favicon_url ? (
                                 <img
                                   src={link.favicon_url}
@@ -831,7 +907,7 @@ export default function Page() {
                                 />
                               ) : null}
                               <div
-                                className="items-center justify-center text-muted-foreground group-hover:text-primary transition-colors"
+                                className="items-center justify-center text-zinc-400 dark:text-zinc-500 transition-colors"
                                 style={{ display: link.favicon_url ? "none" : "flex" }}
                               >
                                 <Link2 className="h-4 w-4" />
@@ -840,12 +916,12 @@ export default function Page() {
 
                             {/* 중앙 정렬된 링크 제목 (수정 시각 노출 제거) */}
                             <div className="text-center min-w-0 px-2">
-                              <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
+                              <h2 className="text-sm font-semibold tracking-wide text-zinc-800 dark:text-zinc-250 truncate">
                                 {link.title}
                               </h2>
                             </div>
 
-                            {/* 오른쪽 수정/삭제 버튼 영역 */}
+                            {/* 오른쪽 수정/삭제 버튼 영역 (애플 미니멀 아웃라인 스타일) */}
                             <div className="flex items-center gap-1.5 justify-end z-10">
                               <Button
                                 size="icon-sm"
@@ -858,7 +934,7 @@ export default function Page() {
                                   setEditUrl(link.url)
                                   setEditError("")
                                 }}
-                                className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-muted cursor-pointer"
+                                className="h-8 w-8 text-zinc-400 dark:text-zinc-550 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md cursor-pointer border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700 transition-all shadow-xs"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
@@ -871,7 +947,7 @@ export default function Page() {
                                   setLinkToDelete(link)
                                   setIsDeleteOpen(true)
                                 }}
-                                className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 cursor-pointer"
+                                className="h-8 w-8 text-zinc-400 dark:text-zinc-550 hover:text-red-500 hover:bg-red-500/10 rounded-md cursor-pointer border border-transparent hover:border-red-200/30 transition-all shadow-xs"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
@@ -885,7 +961,7 @@ export default function Page() {
               </div>
 
             </div>
-          </>
+          </div>
         )}
 
       </div>
@@ -916,7 +992,7 @@ export default function Page() {
                   setLinkToDelete(null)
                 }}
                 className="text-xs px-3 py-1.5 h-auto rounded-lg cursor-pointer"
-                disabled={isSubmitting}
+                disabled={isMutating}
               >
                 취소
               </Button>
@@ -925,9 +1001,9 @@ export default function Page() {
                 variant="destructive"
                 onClick={handleDeleteLink}
                 className="font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer flex items-center justify-center gap-1.5"
-                disabled={isSubmitting}
+                disabled={isMutating}
               >
-                {isSubmitting ? <Spinner /> : "삭제하기"}
+                {isMutating ? <Spinner /> : "삭제하기"}
               </Button>
             </DialogFooter>
           </div>
