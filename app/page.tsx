@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { LinkItem } from "@/data/links"
-import { Link2, Plus } from "lucide-react"
+import { Link2, Plus, Pencil, Trash2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button"
 
 // Firestore 연동을 위한 모듈 임포트
 import { db } from "@/lib/firebase"
-import { collection, addDoc, onSnapshot, query, orderBy, Timestamp, serverTimestamp } from "firebase/firestore"
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, Timestamp, serverTimestamp } from "firebase/firestore"
 
 export default function Page() {
   const [links, setLinks] = useState<LinkItem[]>([])
@@ -28,52 +28,62 @@ export default function Page() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Firestore 데이터 실시간 동기화 및 로드
+  // 수정(인라인 편집)을 위한 로컬 상태들
+  const [editingLinkId, setEditingLinkId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState("")
+  const [editUrl, setEditUrl] = useState("")
+  const [editError, setEditError] = useState("")
+
+  // 삭제 확인 모달을 위한 로컬 상태들
+  const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+
+  // Firestore에서 일회성 패치 방식으로 데이터를 갱신(Refetch)
+  const fetchLinks = async () => {
+    setIsLoading(true)
+    try {
+      const q = query(
+        collection(db, "users/anonymous/links"),
+        orderBy("createdAt", "desc")
+      )
+      const snapshot = await getDocs(q)
+      const fetchedLinks: LinkItem[] = snapshot.docs.map((doc) => {
+        const data = doc.data()
+        let createdAtStr = new Date().toISOString()
+        if (data.createdAt) {
+          createdAtStr = typeof data.createdAt.toDate === "function"
+            ? data.createdAt.toDate().toISOString()
+            : new Date(data.createdAt).toISOString()
+        }
+
+        // DB에 저장되지 않는 파비콘 URL을 입력된 url을 통해 동적 추출
+        let favicon_url = ""
+        try {
+          const urlObj = new URL(data.url || "")
+          favicon_url = `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=64`
+        } catch (err) {
+          // URL 파싱 에러 대응
+        }
+
+        return {
+          id: doc.id,
+          title: data.title || "",
+          url: data.url || "",
+          favicon_url,
+          created_at: createdAtStr
+        }
+      })
+      setLinks(fetchedLinks)
+    } catch (error) {
+      console.error("Firestore links fetch error: ", error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // 컴포넌트 마운트 시 최초 1회 로드
   useEffect(() => {
-    const q = query(
-      collection(db, "users/anonymous/links"),
-      orderBy("createdAt", "desc")
-    )
-    
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const fetchedLinks: LinkItem[] = snapshot.docs.map((doc) => {
-          const data = doc.data()
-          let createdAtStr = new Date().toISOString()
-          if (data.createdAt) {
-            createdAtStr = typeof data.createdAt.toDate === "function"
-              ? data.createdAt.toDate().toISOString()
-              : new Date(data.createdAt).toISOString()
-          }
-
-          // DB 필드에 저장되지 않는 파비콘 URL을 입력된 url을 통해 동적 추출
-          let favicon_url = ""
-          try {
-            const urlObj = new URL(data.url || "")
-            favicon_url = `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=64`
-          } catch (err) {
-            // URL 파싱 에러 시 빈 값 유지
-          }
-
-          return {
-            id: doc.id,
-            title: data.title || "",
-            url: data.url || "",
-            favicon_url,
-            created_at: createdAtStr
-          }
-        })
-        setLinks(fetchedLinks)
-        setIsLoading(false)
-      },
-      (error) => {
-        console.error("Firestore links fetch error: ", error)
-        setIsLoading(false)
-      }
-    )
-
-    return () => unsubscribe()
+    fetchLinks()
   }, [])
 
   const handleAddLink = async (e: React.FormEvent) => {
@@ -120,8 +130,84 @@ export default function Page() {
       setNewUrl("")
       setErrorMessage("")
       setIsDialogOpen(false)
+      
+      // 데이터 갱신
+      await fetchLinks()
     } catch (err) {
       setErrorMessage("올바른 형식의 URL을 입력해 주세요. (예: https://example.com)")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleUpdateLink = async (e: React.FormEvent, id: string) => {
+    e.preventDefault()
+    setEditError("")
+
+    const trimmedTitle = editTitle.trim()
+    const trimmedUrl = editUrl.trim()
+
+    if (!trimmedTitle) {
+      setEditError("링크 제목을 입력해 주세요.")
+      return
+    }
+    if (!trimmedUrl) {
+      setEditError("주소를 입력해 주세요.")
+      return
+    }
+
+    let formattedUrl = trimmedUrl
+    if (!/^https?:\/\//i.test(formattedUrl)) {
+      formattedUrl = `https://${formattedUrl}`
+    }
+
+    try {
+      const urlObj = new URL(formattedUrl)
+      const domain = urlObj.hostname
+      
+      if (!domain.includes(".") || domain.length < 4) {
+        setEditError("올바른 도메인 주소 형식이 아닙니다. (예: example.com)")
+        return
+      }
+
+      setIsSubmitting(true)
+
+      // Firestore의 문서 업데이트
+      await updateDoc(doc(db, "users/anonymous/links", id), {
+        title: trimmedTitle,
+        url: formattedUrl,
+        updatedAt: serverTimestamp()
+      })
+
+      setEditingLinkId(null)
+      setEditTitle("")
+      setEditUrl("")
+      
+      // 데이터 갱신
+      await fetchLinks()
+    } catch (err) {
+      setEditError("올바른 형식의 URL을 입력해 주세요. (예: https://example.com)")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDeleteLink = async () => {
+    if (!linkToDelete) return
+
+    try {
+      setIsSubmitting(true)
+
+      // Firestore에서 문서 삭제
+      await deleteDoc(doc(db, "users/anonymous/links", linkToDelete.id))
+
+      setIsDeleteOpen(false)
+      setLinkToDelete(null)
+      
+      // 데이터 갱신
+      await fetchLinks()
+    } catch (err) {
+      console.error("Delete error: ", err)
     } finally {
       setIsSubmitting(false)
     }
@@ -248,57 +334,184 @@ export default function Page() {
                 </CardContent>
               </Card>
             ) : (
-              links.map((link) => (
-                <a
-                  key={link.id}
-                  href={link.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group block w-full transition-transform duration-200 active:scale-[0.99]"
-                >
-                  <Card className="overflow-hidden border border-border bg-card/60 backdrop-blur-md transition-all duration-300 hover:bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.01] active:border-primary/60">
-                    <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
-                      {/* 왼쪽 Favicon 영역 */}
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/80 border border-border/60 group-hover:bg-primary/10 group-hover:border-primary/20 transition-colors">
-                        {link.favicon_url ? (
-                          <img
-                            src={link.favicon_url}
-                            alt={`${link.title} favicon`}
-                            className="h-5 w-5 object-contain rounded-sm"
-                            onError={(e) => {
-                              e.currentTarget.style.display = "none";
-                              const sibling = e.currentTarget.nextElementSibling as HTMLElement;
-                              if (sibling) sibling.style.display = "flex";
-                            }}
-                          />
-                        ) : null}
-                        <div
-                          className="items-center justify-center text-muted-foreground group-hover:text-primary transition-colors"
-                          style={{ display: link.favicon_url ? "none" : "flex" }}
-                        >
-                          <Link2 className="h-4 w-4" />
+              links.map((link) => 
+                editingLinkId === link.id ? (
+                  /* 인라인 편집 모드 UI */
+                  <Card key={link.id} className="overflow-hidden border border-primary/50 bg-card/85 backdrop-blur-md transition-all duration-300">
+                    <CardContent className="p-4">
+                      <form onSubmit={(e) => handleUpdateLink(e, link.id)} className="flex flex-col gap-3">
+                        <div className="flex flex-col gap-2">
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted-foreground">제목</label>
+                            <Input
+                              value={editTitle}
+                              onChange={(e) => setEditTitle(e.target.value)}
+                              placeholder="링크 제목 입력"
+                              className="h-9 text-sm rounded-lg mt-0.5"
+                              disabled={isSubmitting}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted-foreground">주소</label>
+                            <Input
+                              value={editUrl}
+                              onChange={(e) => setEditUrl(e.target.value)}
+                              placeholder="https://..."
+                              className="h-9 text-sm rounded-lg mt-0.5"
+                              disabled={isSubmitting}
+                            />
+                          </div>
                         </div>
-                      </div>
-
-                      {/* 중앙 정렬된 링크 제목 */}
-                      <div className="text-center min-w-0 px-2">
-                        <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
-                          {link.title}
-                        </h2>
-                      </div>
-
-                      {/* 오른쪽 대칭용 빈 영역 */}
-                      <div className="w-10 h-10" aria-hidden="true" />
+                        {editError && (
+                          <p className="text-xs text-red-500 font-medium">{editError}</p>
+                        )}
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setEditingLinkId(null)}
+                            className="text-xs px-3 py-1.5 h-auto rounded-lg cursor-pointer"
+                            disabled={isSubmitting}
+                          >
+                            취소
+                          </Button>
+                          <Button
+                            type="submit"
+                            style={{ backgroundColor: "#5B5FC7" }}
+                            className="text-white hover:opacity-90 active:scale-[0.98] transition-all font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer border-none"
+                            disabled={isSubmitting}
+                          >
+                            {isSubmitting ? "저장 중..." : "저장"}
+                          </Button>
+                        </div>
+                      </form>
                     </CardContent>
                   </Card>
-                </a>
-              ))
+                ) : (
+                  /* 일반 카드 목록 및 수정/삭제 버튼 */
+                  <a
+                    key={link.id}
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group block w-full transition-transform duration-200 active:scale-[0.99]"
+                  >
+                    <Card className="overflow-hidden border border-border bg-card/60 backdrop-blur-md transition-all duration-300 hover:bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.01] active:border-primary/60">
+                      <CardContent className="grid grid-cols-[40px_1fr_80px] items-center p-4">
+                        {/* 왼쪽 Favicon 영역 */}
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/80 border border-border/60 group-hover:bg-primary/10 group-hover:border-primary/20 transition-colors">
+                          {link.favicon_url ? (
+                            <img
+                              src={link.favicon_url}
+                              alt={`${link.title} favicon`}
+                              className="h-5 w-5 object-contain rounded-sm"
+                              onError={(e) => {
+                                e.currentTarget.style.display = "none";
+                                const sibling = e.currentTarget.nextElementSibling as HTMLElement;
+                                if (sibling) sibling.style.display = "flex";
+                              }}
+                            />
+                          ) : null}
+                          <div
+                            className="items-center justify-center text-muted-foreground group-hover:text-primary transition-colors"
+                            style={{ display: link.favicon_url ? "none" : "flex" }}
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </div>
+                        </div>
+
+                        {/* 중앙 정렬된 링크 제목 */}
+                        <div className="text-center min-w-0 px-2">
+                          <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
+                            {link.title}
+                          </h2>
+                        </div>
+
+                        {/* 오른쪽 수정/삭제 버튼 영역 */}
+                        <div className="flex items-center gap-1.5 justify-end z-10">
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setEditingLinkId(link.id)
+                              setEditTitle(link.title)
+                              setEditUrl(link.url)
+                              setEditError("")
+                            }}
+                            className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-muted cursor-pointer"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setLinkToDelete(link)
+                              setIsDeleteOpen(true)
+                            }}
+                            className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </a>
+                )
+              )
             )}
           </div>
 
         </div>
 
       </div>
+
+      {/* 삭제 확인 모달 */}
+      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <div className="flex flex-col gap-4">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-bold">정말 삭제하시겠습니까?</DialogTitle>
+            </DialogHeader>
+            
+            <div className="flex flex-col gap-2 py-2">
+              <p className="text-sm text-foreground">
+                삭제 대상: <span className="font-semibold">{linkToDelete?.title}</span>
+              </p>
+              <p className="text-xs text-red-500 font-semibold bg-red-50 dark:bg-red-950/20 p-2.5 rounded-lg border border-red-200 dark:border-red-900/50">
+                이 작업은 되돌릴 수 없습니다
+              </p>
+            </div>
+
+            <DialogFooter className="flex gap-2 justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsDeleteOpen(false)
+                  setLinkToDelete(null)
+                }}
+                className="text-xs px-3 py-1.5 h-auto rounded-lg cursor-pointer"
+                disabled={isSubmitting}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                onClick={handleDeleteLink}
+                className="bg-red-500 text-white hover:bg-red-600 transition-colors font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "삭제 중..." : "삭제하기"}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* 화면 최하단 브랜딩 워터마크 */}
       <div className="flex flex-col items-center gap-3 pt-12 pb-2">
