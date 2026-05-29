@@ -12,6 +12,7 @@ function ThemeProvider({
       attribute="class"
       defaultTheme="light"
       enableSystem
+      disableTransitionOnChange={false}
       {...props}
     >
       <ThemeHotkey />

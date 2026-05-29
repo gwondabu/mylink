@@ -56,6 +56,7 @@ export default function Page() {
   const [profileDisplayName, setProfileDisplayName] = useState("")
   const [profileBio, setProfileBio] = useState("")
   const [profileError, setProfileError] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // 삭제 확인 모달을 위한 로컬 상태들
   const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
