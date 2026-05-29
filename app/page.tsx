@@ -52,6 +52,7 @@ export default function Page() {
   const [profileBio, setProfileBio] = useState("")
   const [profileError, setProfileError] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isLoggingIn, setIsLoggingIn] = useState(false)
 
   // 삭제 확인 모달을 위한 로컬 상태들
   const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
@@ -224,11 +225,22 @@ export default function Page() {
   })
 
   const handleLogin = async () => {
+    if (isLoggingIn) return
+    setIsLoggingIn(true)
     const provider = new GoogleAuthProvider()
     try {
       await signInWithPopup(auth, provider)
-    } catch (error) {
-      console.error("Login failed: ", error)
+    } catch (error: any) {
+      if (
+        error.code === "auth/cancelled-popup-request" ||
+        error.code === "auth/popup-closed-by-user"
+      ) {
+        console.warn("Login popup was closed or cancelled:", error.message)
+      } else {
+        console.error("Login failed: ", error)
+      }
+    } finally {
+      setIsLoggingIn(false)
     }
   }
 
@@ -443,9 +455,10 @@ export default function Page() {
             <div className="w-full max-w-xs flex flex-col gap-4 px-4">
               <Button 
                 onClick={handleLogin}
-                className="w-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-100 active:scale-[0.98] transition-all py-6 text-sm font-semibold rounded-full cursor-pointer border-none shadow-md"
+                disabled={isLoggingIn}
+                className="w-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-100 active:scale-[0.98] transition-all py-6 text-sm font-semibold rounded-full cursor-pointer border-none shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                Google 계정으로 시작하기
+                {isLoggingIn ? <Spinner className="h-4 w-4" /> : "Google 계정으로 시작하기"}
               </Button>
             </div>
           </div>
