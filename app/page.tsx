@@ -57,6 +57,13 @@ export default function Page() {
             : new Date(data.createdAt).toISOString()
         }
 
+        let updatedAtStr = undefined
+        if (data.updatedAt) {
+          updatedAtStr = typeof data.updatedAt.toDate === "function"
+            ? data.updatedAt.toDate().toISOString()
+            : new Date(data.updatedAt).toISOString()
+        }
+
         // DB에 저장되지 않는 파비콘 URL을 입력된 url을 통해 동적 추출
         let favicon_url = ""
         try {
@@ -71,7 +78,8 @@ export default function Page() {
           title: data.title || "",
           url: data.url || "",
           favicon_url,
-          created_at: createdAtStr
+          created_at: createdAtStr,
+          updated_at: updatedAtStr
         }
       })
       setLinks(fetchedLinks)
@@ -422,10 +430,21 @@ export default function Page() {
                         </div>
 
                         {/* 중앙 정렬된 링크 제목 */}
-                        <div className="text-center min-w-0 px-2">
+                        <div className="text-center min-w-0 px-2 flex flex-col gap-0.5">
                           <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
                             {link.title}
                           </h2>
+                          {link.updated_at && (
+                            <p className="text-[10px] text-muted-foreground/60 select-none">
+                              수정됨: {new Date(link.updated_at).toLocaleString("ko-KR", {
+                                year: "numeric",
+                                month: "2-digit",
+                                day: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit"
+                              })}
+                            </p>
+                          )}
                         </div>
 
                         {/* 오른쪽 수정/삭제 버튼 영역 */}
