@@ -108,3 +108,4 @@
 
 ## 5. 관련 문서
 * **[사용자 시나리오 (User Scenarios)](./scenarios.md)**
+* **[와이어프레임 및 화면 설계서 (Wireframes)](./wireframes.md)**
