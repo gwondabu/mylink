@@ -2,7 +2,7 @@
 
 import { use, useState, useEffect } from "react"
 import { db } from "@/lib/firebase"
-import { collection, doc, getDoc, getDocs, query, orderBy } from "firebase/firestore"
+import { collection, doc, getDocs, query, orderBy, updateDoc, increment } from "firebase/firestore"
 import { UserProfile } from "@/hooks/use-user"
 import { LinkItem } from "@/data/links"
 import { Card, CardContent } from "@/components/ui/card"
@@ -78,7 +78,8 @@ export default function UserLandingPage({ params }: PageProps) {
             title: data.title || "",
             url: data.url || "",
             favicon_url,
-            created_at: createdAtStr
+            created_at: createdAtStr,
+            clickCount: data.clickCount || 0
           }
         })
 
@@ -96,12 +97,32 @@ export default function UserLandingPage({ params }: PageProps) {
     }
   }, [username])
 
+  // 클릭 이벤트 핸들러: 클릭 카운트 누적 후 새 창 열기
+  const handleClickLink = async (link: LinkItem) => {
+    if (!profile) return
+
+    // 새 탭으로 우선 연결
+    window.open(link.url, "_blank", "noopener,noreferrer")
+
+    try {
+      // Firestore clickCount 필드 원자적으로 1 증가
+      const linkDocRef = doc(db, `users/${profile.uid}/links`, link.id)
+      await updateDoc(linkDocRef, {
+        clickCount: increment(1)
+      })
+    } catch (err) {
+      console.error("클릭 카운트 저장 중 오류가 발생했습니다 (Security Rules 등):", err)
+    }
+  }
+
   const getInitials = () => {
     if (profile?.displayName) {
       return profile.displayName.slice(0, 2).toUpperCase()
     }
     return "ML"
   }
+
+  const totalClicks = links.reduce((sum, link) => sum + (link.clickCount || 0), 0)
 
   if (loading) {
     return (
@@ -147,7 +168,7 @@ export default function UserLandingPage({ params }: PageProps) {
         </span>
       </header>
 
-      {/* 메인 프로필 및 링크 목록 */}
+      {/* 인스타그램 스타일 프로필 레이아웃 */}
       <div className="flex w-full max-w-md flex-col items-center gap-8 my-auto z-10 animate-fade-in">
         <div className="flex gap-6 items-start pb-6 border-b border-zinc-200/60 dark:border-zinc-800/60 w-full">
           <Avatar size="lg" className="h-20 w-20 sm:h-24 sm:w-24 shrink-0 ring-4 ring-background shadow-md">
@@ -162,13 +183,15 @@ export default function UserLandingPage({ params }: PageProps) {
               <h1 className="text-lg font-bold tracking-tight text-foreground truncate max-w-[200px]">
                 {profile.displayName || "ML User"}
               </h1>
-              <span className="text-[10px] font-mono font-semibold text-zinc-500 dark:text-zinc-400 bg-zinc-150 dark:bg-zinc-800 px-2 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700 select-none">
+              <span className="text-[10px] font-mono font-semibold text-zinc-550 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700 select-none">
                 @{profile.username}
               </span>
             </div>
             
+            {/* 인스타그램 스타일의 링크 수, 총 클릭 수 정보 */}
             <div className="flex gap-4 text-xs text-zinc-650 dark:text-zinc-400 select-none">
               <div>링크 <span className="font-bold text-foreground">{links.length}</span></div>
+              <div>클릭 <span className="font-bold text-foreground">{totalClicks}</span></div>
             </div>
 
             {profile.profile_bio ? (
@@ -194,12 +217,10 @@ export default function UserLandingPage({ params }: PageProps) {
           ) : (
             <div className="flex w-full flex-col gap-4">
               {links.map((link) => (
-                <a
+                <button
                   key={link.id}
-                  href={link.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group block w-full transition-transform duration-200 active:scale-[0.99]"
+                  onClick={() => handleClickLink(link)}
+                  className="group block w-full text-left transition-transform duration-200 active:scale-[0.99] cursor-pointer"
                 >
                   <Card className="overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 bg-white/40 dark:bg-zinc-900/40 backdrop-blur-md transition-all duration-300 hover:bg-white dark:hover:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-md hover:scale-[1.01]">
                     <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
@@ -221,14 +242,15 @@ export default function UserLandingPage({ params }: PageProps) {
                         </div>
                       </div>
                       <div className="text-center min-w-0 px-2">
-                        <h2 className="text-sm font-semibold tracking-wide text-zinc-800 dark:text-zinc-250 truncate">
+                        {/* 다크모드 글씨 선명도를 위해 dark:text-white 적용 */}
+                        <h2 className="text-sm font-semibold tracking-wide text-zinc-800 dark:text-white truncate">
                           {link.title}
                         </h2>
                       </div>
                       <div className="w-10 h-10" />
                     </CardContent>
                   </Card>
-                </a>
+                </button>
               ))}
             </div>
           )}

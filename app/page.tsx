@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { LinkItem } from "@/data/links"
-import { Link2, Plus, Pencil, Trash2, ArrowLeft } from "lucide-react"
+import { Link2, Plus, Pencil, Trash2, BarChart2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -18,12 +18,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 
 // 커스텀 훅 및 공통 컴포넌트 임포트
-import { useUser, UserProfile } from "@/hooks/use-user"
+import { useUser } from "@/hooks/use-user"
 import { Header } from "@/components/header"
 
 // Firestore 및 Auth 임포트
 import { db, auth } from "@/lib/firebase"
-import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp } from "firebase/firestore"
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp } from "firebase/firestore"
 import { signInWithPopup, GoogleAuthProvider } from "firebase/auth"
 
 // TanStack Query 임포트
@@ -57,7 +57,7 @@ export default function Page() {
   const [linkToDelete, setLinkToDelete] = useState<LinkItem | null>(null)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
 
-  // 1. [TanStack Query] 링크 리스트 조회 (staleTime 5분 지정, enabled 제어)
+  // 1. [TanStack Query] 링크 리스트 조회
   const { data: links = [], isLoading } = useQuery<LinkItem[]>({
     queryKey: ["links", user?.uid],
     queryFn: async () => {
@@ -67,8 +67,8 @@ export default function Page() {
         orderBy("createdAt", "desc")
       )
       const snapshot = await getDocs(q)
-      return snapshot.docs.map((doc) => {
-        const data = doc.data()
+      return snapshot.docs.map((docSnap) => {
+        const data = docSnap.data()
         let createdAtStr = new Date().toISOString()
         if (data.createdAt) {
           createdAtStr = typeof data.createdAt.toDate === "function"
@@ -90,12 +90,13 @@ export default function Page() {
         } catch (err) {}
 
         return {
-          id: doc.id,
+          id: docSnap.id,
           title: data.title || "",
           url: data.url || "",
           favicon_url,
           created_at: createdAtStr,
-          updated_at: updatedAtStr
+          updated_at: updatedAtStr,
+          clickCount: data.clickCount || 0
         }
       })
     },
@@ -110,7 +111,8 @@ export default function Page() {
         title: newLink.title,
         url: newLink.url,
         createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        clickCount: 0
       })
     },
     onMutate: async (newLink) => {
@@ -129,7 +131,8 @@ export default function Page() {
         title: newLink.title,
         url: newLink.url,
         favicon_url,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        clickCount: 0
       }
 
       queryClient.setQueryData<LinkItem[]>(["links", user?.uid], (old) => [
@@ -260,7 +263,6 @@ export default function Page() {
         return
       }
 
-      // 리액트 쿼리 뮤테이션 실행
       await addMutation.mutateAsync({ title: trimmedTitle, url: formattedUrl })
 
       setNewTitle("")
@@ -303,7 +305,6 @@ export default function Page() {
         return
       }
 
-      // 리액트 쿼리 뮤테이션 실행
       await updateMutation.mutateAsync({ id, title: trimmedTitle, url: formattedUrl })
 
       setEditingLinkId(null)
@@ -323,7 +324,6 @@ export default function Page() {
     const trimmedDisplayName = profileDisplayName.trim()
     const trimmedBio = profileBio.trim()
 
-    // 1. 유효성 검사
     if (!trimmedUsername) {
       setProfileError("사용자 이름(username)을 입력해 주세요.")
       return
@@ -341,7 +341,6 @@ export default function Page() {
       return
     }
 
-    // 2. 변경 사항이 없으면 Firestore 업데이트 없이 종료 (최적화)
     if (
       trimmedUsername === profile.username &&
       trimmedDisplayName === profile.displayName &&
@@ -354,7 +353,6 @@ export default function Page() {
     try {
       setIsSubmitting(true)
 
-      // 3. username 중복 체크 (본인 uid는 제외)
       const usersRef = collection(db, "users")
       const q = query(usersRef, where("username", "==", trimmedUsername))
       const querySnapshot = await getDocs(q)
@@ -365,7 +363,6 @@ export default function Page() {
         return
       }
 
-      // 4. Firestore users/{userId} 개별 필드 업데이트
       const userDocRef = doc(db, "users", user.uid)
       await updateDoc(userDocRef, {
         username: trimmedUsername,
@@ -386,7 +383,6 @@ export default function Page() {
     if (!user || !linkToDelete) return
 
     try {
-      // 리액트 쿼리 뮤테이션 실행
       await deleteMutation.mutateAsync(linkToDelete.id)
       setIsDeleteOpen(false)
       setLinkToDelete(null)
@@ -405,20 +401,21 @@ export default function Page() {
     return "ML"
   }
 
-  // 로딩 상태 통합 (리액트 쿼리 Mutation 로딩 상태 포함)
   const isMutating = addMutation.isPending || updateMutation.isPending || deleteMutation.isPending || isSubmitting
+
+  // 통계 연산
+  const totalClicks = links.reduce((sum, link) => sum + (link.clickCount || 0), 0)
+  const sortedLinksForStats = [...links].sort((a, b) => (b.clickCount || 0) - (a.clickCount || 0))
 
   return (
     <div className="relative flex min-h-screen flex-col items-center bg-background px-4 pb-16 overflow-hidden">
       
-      {/* 백그라운드 디자인용 은은한 애플 스타일 광원 (Rich Aesthetics) */}
+      {/* 백그라운드 디자인용 은은한 광원 */}
       <div className="absolute top-[-20%] left-[-10%] w-[70%] aspect-square rounded-full bg-zinc-200/20 dark:bg-zinc-800/10 blur-[150px] pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-10%] w-[70%] aspect-square rounded-full bg-zinc-300/20 dark:bg-zinc-700/10 blur-[150px] pointer-events-none" />
 
-      {/* 상단 헤더 영역 */}
       <Header />
 
-      {/* 중앙 메인 콘텐츠 컨테이너 */}
       <div className="flex w-full max-w-md flex-col items-center gap-8 my-auto w-full z-10">
         
         {authLoading ? (
@@ -427,17 +424,11 @@ export default function Page() {
             <p className="text-xs text-muted-foreground animate-pulse">사용자 정보 확인 중...</p>
           </div>
         ) : !user ? (
-          /* ========================================================
-             비로그인 애플 스타일 화면 가득 채운 랜딩페이지 (Apple style aesthetics)
-             ======================================================== */
           <div className="flex w-full flex-col items-center justify-center min-h-[75vh] py-8 text-center animate-in fade-in-0 duration-1000 slide-in-from-bottom-8">
-            
-            {/* 애플 스타일의 미니멀 배지 */}
             <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700/80 text-[10px] font-semibold tracking-wider uppercase mb-6 select-none animate-pulse">
               Introducing MyLink
             </div>
             
-            {/* 웅장하고 큰 메인 카피 */}
             <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-foreground leading-[1.1] max-w-lg mb-4">
               Development in
               <span className="block bg-gradient-to-r from-zinc-950 via-zinc-700 to-zinc-500 dark:from-white dark:via-zinc-300 dark:to-zinc-500 bg-clip-text text-transparent">
@@ -445,12 +436,10 @@ export default function Page() {
               </span>
             </h1>
 
-            {/* 깔끔한 서브 헤드라인 */}
             <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-sm leading-relaxed font-normal mb-8 px-4">
               깃허브, 블로그, 포트폴리오를 가장 미니멀하고 직관적인 단 하나의 링크로 통합하여 표현해 보세요.
             </p>
 
-            {/* 시작하기 버튼 영역 */}
             <div className="w-full max-w-xs flex flex-col gap-4 px-4">
               <Button 
                 onClick={handleLogin}
@@ -459,47 +448,43 @@ export default function Page() {
                 Google 계정으로 시작하기
               </Button>
             </div>
-            
           </div>
         ) : (
-          /* ========================================================
-             로그인 성공 시의 내 링크 관리 대시보드 화면 (애플 스타일 리팩토링)
-             ======================================================== */
           <div className="flex w-full flex-col gap-8 w-full animate-fade-in">
-            {/* 사용자 프로필 헤더 */}
-            <div className="flex flex-col items-center text-center gap-4 w-full">
-              <Avatar size="lg" className="h-24 w-24 ring-4 ring-background shadow-lg transition-transform duration-300 hover:scale-105">
+            
+            {/* 인스타그램 스타일 프로필 헤더 */}
+            <div className="flex gap-6 items-start pb-6 border-b border-zinc-200/60 dark:border-zinc-800/60 w-full text-left">
+              <Avatar size="lg" className="h-20 w-20 sm:h-24 sm:w-24 shrink-0 ring-4 ring-background shadow-lg transition-transform duration-300 hover:scale-105">
                 <AvatarImage src={profile?.profile_image_url || user.photoURL || undefined} alt="Profile avatar image" />
-                <AvatarFallback className="text-2xl font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200">{getInitials()}</AvatarFallback>
+                <AvatarFallback className="text-2xl font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-250">{getInitials()}</AvatarFallback>
               </Avatar>
               
-              <div className="flex flex-col gap-2.5 items-center w-full">
-                <div className="flex flex-col gap-1 items-center">
-                  <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <div className="flex flex-col gap-2.5 min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-100 truncate max-w-[180px]">
                     {profile?.displayName || user.displayName || user.email?.split("@")[0]}
                   </h1>
-                  
-                  {/* username 출력 영역 (@ 기호 닉네임에서 분리, 애플 감성 배지) */}
-                  <p className="text-[11px] font-mono font-semibold text-zinc-600 dark:text-zinc-350 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 rounded-full border border-zinc-200 dark:border-zinc-700/80 select-none">
+                  <span className="text-[10px] font-mono font-semibold text-zinc-600 dark:text-zinc-350 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full border border-zinc-200 dark:border-zinc-700/80 select-none">
                     @{profile?.username || user.email?.split("@")[0]}
-                  </p>
+                  </span>
                 </div>
 
-                <p className="text-[10px] text-zinc-400 dark:text-zinc-550 select-none">
-                  {profile?.email || user.email}
-                </p>
+                {/* 인스타그램 스타일 통계 (대시보드에도 링크 수, 클릭 수 노출) */}
+                <div className="flex gap-4 text-xs text-zinc-650 dark:text-zinc-400 select-none">
+                  <div>링크 <span className="font-bold text-foreground">{links.length}</span></div>
+                  <div>총 클릭 <span className="font-bold text-foreground">{totalClicks}</span></div>
+                </div>
 
                 {profile?.profile_bio ? (
-                  <p className="text-xs text-zinc-600 dark:text-zinc-300 max-w-xs font-normal leading-relaxed mt-1 p-3.5 bg-zinc-50/60 dark:bg-zinc-900/60 rounded-xl border border-zinc-200 dark:border-zinc-800/80 w-full text-center shadow-xs">
+                  <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed mt-1 whitespace-pre-line">
                     {profile.profile_bio}
                   </p>
                 ) : (
-                  <p className="text-xs text-zinc-400 dark:text-zinc-500 max-w-xs font-normal leading-relaxed mt-1">
+                  <p className="text-xs text-zinc-400 dark:text-zinc-555 leading-relaxed mt-1">
                     나의 소중한 소셜 미디어와 링크들을 한 곳에 모았습니다.
                   </p>
                 )}
 
-                {/* 프로필 수정 모달 버튼 */}
                 <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
                   <DialogTrigger
                     render={
@@ -512,7 +497,7 @@ export default function Page() {
                         }}
                         variant="outline"
                         size="xs"
-                        className="mt-2 text-[11px] rounded-lg h-7 px-3.5 cursor-pointer flex items-center gap-1.5 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors shadow-xs"
+                        className="mt-2 text-[11px] rounded-lg h-7 px-3.5 cursor-pointer flex items-center gap-1.5 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors shadow-xs w-fit"
                       />
                     }
                   >
@@ -578,11 +563,9 @@ export default function Page() {
 
             {/* 내 링크 관리 영역 (애플 디자인 스타일) */}
             <div className="flex w-full flex-col gap-4">
-              
               <div className="flex items-center justify-between border-b pb-2 border-zinc-200/80 dark:border-zinc-800/80">
                 <h2 className="text-[14px] font-bold text-zinc-800 dark:text-zinc-200">내 링크 목록</h2>
                 
-                {/* 추가 폼 다이얼로그 */}
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                   <DialogTrigger
                     render={
@@ -647,13 +630,10 @@ export default function Page() {
                     {[1, 2, 3].map((i) => (
                       <Card key={i} className="overflow-hidden border border-border/40 bg-card/30 backdrop-blur-md">
                         <CardContent className="grid grid-cols-[40px_1fr_40px] items-center p-4">
-                          {/* 왼쪽 Favicon 슬롯 */}
                           <div className="h-10 w-10 rounded-lg bg-muted border border-border/40" />
-                          {/* 중앙 제목 슬롯 */}
                           <div className="flex justify-center px-4">
                             <div className="h-4 bg-muted rounded w-24" />
                           </div>
-                          {/* 오른쪽 대칭용 슬롯 */}
                           <div className="w-10 h-10" />
                         </CardContent>
                       </Card>
@@ -676,7 +656,6 @@ export default function Page() {
                 ) : (
                   links.map((link) => 
                     editingLinkId === link.id ? (
-                      /* 인라인 편집 모드 UI */
                       <Card key={link.id} className="overflow-hidden border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 transition-all duration-300">
                         <CardContent className="p-4">
                           <form onSubmit={(e) => handleUpdateLink(e, link.id)} className="flex flex-col gap-3">
@@ -728,7 +707,6 @@ export default function Page() {
                         </CardContent>
                       </Card>
                     ) : (
-                      /* 일반 카드 목록 및 수정/삭제 버튼 (애플 스타일의 모노톤 적용) */
                       <a
                         key={link.id}
                         href={link.url}
@@ -738,7 +716,6 @@ export default function Page() {
                       >
                         <Card className="overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 bg-white/40 dark:bg-zinc-900/40 backdrop-blur-md transition-all duration-300 hover:bg-white dark:hover:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-sm">
                           <CardContent className="grid grid-cols-[40px_1fr_80px] items-center p-4">
-                            {/* 왼쪽 Favicon 영역 */}
                             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200/60 dark:border-zinc-750 group-hover:bg-zinc-200 dark:group-hover:bg-zinc-700 transition-colors">
                               {link.favicon_url ? (
                                 <img
@@ -753,21 +730,20 @@ export default function Page() {
                                 />
                               ) : null}
                               <div
-                                className="items-center justify-center text-zinc-400 dark:text-zinc-500 transition-colors"
+                                className="items-center justify-center text-zinc-400 dark:text-zinc-555 transition-colors"
                                 style={{ display: link.favicon_url ? "none" : "flex" }}
                               >
                                 <Link2 className="h-4 w-4" />
                               </div>
                             </div>
 
-                            {/* 중앙 정렬된 링크 제목 (수정 시각 노출 제거) */}
                             <div className="text-center min-w-0 px-2">
-                              <h2 className="text-sm font-semibold tracking-wide text-zinc-800 dark:text-zinc-250 truncate">
+                              {/* 다크모드 글씨 선명도를 위해 dark:text-white 적용 */}
+                              <h2 className="text-sm font-semibold tracking-wide text-zinc-800 dark:text-white truncate">
                                 {link.title}
                               </h2>
                             </div>
 
-                            {/* 오른쪽 수정/삭제 버튼 영역 (애플 미니멀 아웃라인 스타일) */}
                             <div className="flex items-center gap-1.5 justify-end z-10">
                               <Button
                                 size="icon-sm"
@@ -780,7 +756,7 @@ export default function Page() {
                                   setEditUrl(link.url)
                                   setEditError("")
                                 }}
-                                className="h-8 w-8 text-zinc-400 dark:text-zinc-550 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md cursor-pointer border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700 transition-all shadow-xs"
+                                className="h-8 w-8 text-zinc-400 dark:text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md cursor-pointer border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700 transition-all shadow-xs"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
@@ -793,7 +769,7 @@ export default function Page() {
                                   setLinkToDelete(link)
                                   setIsDeleteOpen(true)
                                 }}
-                                className="h-8 w-8 text-zinc-400 dark:text-zinc-550 hover:text-red-500 hover:bg-red-500/10 rounded-md cursor-pointer border border-transparent hover:border-red-200/30 transition-all shadow-xs"
+                                className="h-8 w-8 text-zinc-400 dark:text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-md cursor-pointer border border-transparent hover:border-red-200/30 transition-all shadow-xs"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
@@ -805,8 +781,52 @@ export default function Page() {
                   )
                 )}
               </div>
-
             </div>
+
+            {/* 📊 링크 분석 및 통계 섹션 */}
+            <div className="flex w-full flex-col gap-4 mt-2">
+              <div className="flex items-center gap-1.5 border-b pb-2 border-zinc-200/80 dark:border-zinc-800/80">
+                <BarChart2 className="h-4 w-4 text-zinc-500" />
+                <h2 className="text-[14px] font-bold text-zinc-800 dark:text-zinc-200">📊 링크 분석 및 통계</h2>
+              </div>
+              
+              <Card className="border border-zinc-200/80 dark:border-zinc-800/80 bg-white/40 dark:bg-zinc-900/40 backdrop-blur-md">
+                <CardContent className="p-5 flex flex-col gap-6">
+                  {/* 총 클릭 수 강조 */}
+                  <div className="flex flex-col gap-1 items-center justify-center py-2 border-b border-zinc-100 dark:border-zinc-800/50">
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">총 누적 클릭 수</span>
+                    <span className="text-3xl font-extrabold tracking-tight text-primary">
+                      총 {totalClicks} 클릭
+                    </span>
+                  </div>
+
+                  {/* 링크별 클릭수 리스트 (내림차순 정렬) */}
+                  <div className="flex flex-col gap-3">
+                    <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">링크별 성과 (클릭 순)</span>
+                    {sortedLinksForStats.length === 0 ? (
+                      <p className="text-[11px] text-zinc-400 text-center py-2">아직 통계 데이터가 없습니다.</p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {sortedLinksForStats.map((link) => (
+                          <div 
+                            key={link.id}
+                            className="flex justify-between items-center text-xs p-2.5 rounded-lg bg-zinc-50/50 dark:bg-zinc-900/30 border border-zinc-100 dark:border-zinc-800/60"
+                          >
+                            <span className="font-semibold text-zinc-700 dark:text-zinc-300 truncate max-w-[200px]">
+                              {link.title}
+                            </span>
+                            <span className="font-mono text-zinc-500 dark:text-zinc-400 shrink-0">
+                              {link.clickCount || 0} clicks
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
           </div>
         )}
 

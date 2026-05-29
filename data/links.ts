@@ -5,6 +5,7 @@ export type LinkItem = {
   favicon_url?: string;
   created_at: string;
   updated_at?: string;
+  clickCount?: number;
 };
 
 export const dummyLinks: LinkItem[] = [];

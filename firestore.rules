@@ -12,7 +12,9 @@ service cloud.firestore {
     // 사용자 하위 링크 서브컬렉션 규칙
     match /users/{userId}/links/{linkId} {
       allow read: if true; // 누구나 링크 목록 읽기 가능
-      allow write: if request.auth != null && request.auth.uid == userId; // 로그인된 본인만 생성/수정/삭제 가능
+      // 쓰기는 본인만 가능하지만, 외부 유저도 'clickCount' 필드만 1 증가(update) 시키는 요청은 허용함
+      allow write: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clickCount']);
     }
   }
 }
