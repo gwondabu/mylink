@@ -104,6 +104,10 @@ export function Header() {
                     <Copy className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
                     <span>내 페이지 링크 복사</span>
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => window.location.href = "/stats"} className="cursor-pointer text-xs font-medium py-2">
+                    <span className="mr-2">📊</span>
+                    <span>통계 리포트</span>
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout} variant="destructive" className="cursor-pointer text-xs font-medium py-2">
                     <LogOut className="h-3.5 w-3.5 mr-2" />
