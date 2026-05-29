@@ -502,8 +502,9 @@ export default function Page() {
               </Button>
               <Button
                 type="button"
+                variant="destructive"
                 onClick={handleDeleteLink}
-                className="bg-red-500 text-white hover:bg-red-600 transition-colors font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer border-none disabled:opacity-50 disabled:cursor-not-allowed"
+                className="font-semibold rounded-lg text-xs px-3 py-1.5 h-auto cursor-pointer"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? "삭제 중..." : "삭제하기"}
