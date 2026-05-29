@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
 import { LinkItem } from "@/data/links"
 import { Link2, Plus, Pencil, Trash2, BarChart2 } from "lucide-react"
@@ -456,14 +457,59 @@ export default function Page() {
               깃허브, 블로그, 포트폴리오를 가장 미니멀하고 직관적인 단 하나의 링크로 통합하여 표현해 보세요.
             </p>
 
-            <div className="w-full max-w-xs flex flex-col gap-4 px-4">
-              <Button 
-                onClick={handleLogin}
-                disabled={isLoggingIn}
-                className="w-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-100 active:scale-[0.98] transition-all py-6 text-sm font-semibold rounded-full cursor-pointer border-none shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            <div className="w-full max-w-xs flex flex-col gap-4 px-4 mb-10">
+              <Link 
+                href="/login"
+                className="w-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-100 active:scale-[0.98] transition-all py-3.5 text-sm font-semibold rounded-full cursor-pointer border-none shadow-md flex items-center justify-center"
               >
-                {isLoggingIn ? <Spinner className="h-4 w-4" /> : "Google 계정으로 시작하기"}
-              </Button>
+                시작하기
+              </Link>
+            </div>
+
+            {/* 3대 핵심 기능 소개 카드 */}
+            <div className="flex w-full flex-col gap-4 px-4 text-left animate-in fade-in-0 duration-1000 slide-in-from-bottom-12 delay-200">
+              <div className="flex flex-col gap-1 items-start mb-2 border-b pb-2 border-zinc-200/60 dark:border-zinc-800/60 w-full">
+                <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">Key Features</span>
+                <h2 className="text-sm font-bold text-zinc-800 dark:text-zinc-250">주요 기능 안내</h2>
+              </div>
+              
+              <div className="grid grid-cols-1 gap-4 w-full">
+                <Card className="border border-zinc-200/50 dark:border-zinc-800/60 bg-white/40 dark:bg-zinc-900/30 backdrop-blur-xs shadow-xs rounded-2xl">
+                  <CardContent className="p-5 flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">🔗</span>
+                      <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100">무제한 링크 관리</h3>
+                    </div>
+                    <p className="text-[11px] text-zinc-550 dark:text-zinc-400 leading-relaxed font-normal">
+                      소셜 미디어, 블로그, 포트폴리오 등 원하는 모든 링크를 제한 없이 등록하고 언제든지 간편하게 편집하세요.
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="border border-zinc-200/50 dark:border-zinc-800/60 bg-white/40 dark:bg-zinc-900/30 backdrop-blur-xs shadow-xs rounded-2xl">
+                  <CardContent className="p-5 flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">📊</span>
+                      <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100">실시간 클릭 통계</h3>
+                    </div>
+                    <p className="text-[11px] text-zinc-550 dark:text-zinc-400 leading-relaxed font-normal">
+                      각 소셜 링크별 누적 클릭수와 성과율을 세련된 대시보드 차트와 진행 바로 투명하게 실시간 분석합니다.
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="border border-zinc-200/50 dark:border-zinc-800/60 bg-white/40 dark:bg-zinc-900/30 backdrop-blur-xs shadow-xs rounded-2xl">
+                  <CardContent className="p-5 flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">✨</span>
+                      <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100">나만의 고유 URL</h3>
+                    </div>
+                    <p className="text-[11px] text-zinc-550 dark:text-zinc-400 leading-relaxed font-normal">
+                      기억하기 쉽고 깔끔한 mylink.to/username 주소를 제공하여 소셜 채널 및 프로필 공유 효율성을 극대화합니다.
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
           </div>
         ) : (
