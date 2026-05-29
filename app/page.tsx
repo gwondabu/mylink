@@ -305,9 +305,9 @@ export default function Page() {
   return (
     <div className="relative flex min-h-screen flex-col items-center bg-background px-4 pb-16 overflow-hidden">
       
-      {/* 백그라운드 디자인용 이펙트 블러 서클 (Rich Aesthetics) */}
-      <div className="absolute top-[-10%] left-[-20%] w-[60%] aspect-square rounded-full bg-primary/10 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-20%] w-[60%] aspect-square rounded-full bg-violet-500/10 blur-[120px] pointer-events-none" />
+      {/* 백그라운드 디자인용 은은한 애플 스타일 광원 (Rich Aesthetics) */}
+      <div className="absolute top-[-20%] left-[-10%] w-[70%] aspect-square rounded-full bg-zinc-200/20 dark:bg-zinc-800/10 blur-[150px] pointer-events-none" />
+      <div className="absolute bottom-[-20%] right-[-10%] w-[70%] aspect-square rounded-full bg-zinc-300/20 dark:bg-zinc-700/10 blur-[150px] pointer-events-none" />
 
       {/* 상단 헤더 영역 (미리보기 모드 또는 타인 조회 모드일 때는 간단한 뒤로가기 바 제공) */}
       {isPreviewMode ? (
@@ -429,51 +429,66 @@ export default function Page() {
           </div>
         ) : !user ? (
           /* ========================================================
-             비로그인 애니메이션 랜딩페이지 (Vibrant, Premium Aesthetics)
+             비로그인 애플 스타일 화면 가득 채운 랜딩페이지 (Apple style aesthetics)
              ======================================================== */
-          <div className="flex w-full flex-col gap-8 my-auto items-center text-center py-8 animate-in fade-in-0 duration-1000 slide-in-from-bottom-8">
-            <Card className="border border-border/80 bg-card/45 backdrop-blur-lg w-full shadow-2xl relative overflow-hidden group">
-              {/* 카드 내부의 은은한 네온 빛 레이어 */}
-              <div className="absolute top-0 right-0 w-32 h-32 rounded-full bg-gradient-to-tr from-primary/30 to-violet-500/30 opacity-40 blur-2xl group-hover:scale-125 transition-transform duration-700" />
-              
-              <CardContent className="flex flex-col items-center justify-center p-8 gap-8">
-                {/* 로고 영역 */}
-                <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-tr from-primary via-violet-500 to-indigo-500 text-white shadow-xl shadow-primary/20 rotate-[-4deg] hover:rotate-[4deg] transition-transform duration-300">
-                  <Link2 className="h-10 w-10 animate-pulse" />
-                </div>
-                
-                {/* 메인 타이틀 및 소개글 */}
-                <div className="flex flex-col gap-3">
-                  <h2 className="text-2xl font-extrabold tracking-tight text-foreground bg-gradient-to-r from-primary via-violet-500 to-indigo-500 bg-clip-text text-transparent">
-                    Development in One Link
-                  </h2>
-                  <p className="text-xs text-muted-foreground max-w-[310px] leading-relaxed font-normal">
-                    나의 깃허브 레포지토리, 기술 블로그, 커리어 포트폴리오를 단 하나의 링크로 통합하여 표현해 보세요. 오직 개발자들을 위한 최상의 링크트리 솔루션입니다.
-                  </p>
-                </div>
+          <div className="flex w-full flex-col items-center justify-center min-h-[75vh] py-8 text-center animate-in fade-in-0 duration-1000 slide-in-from-bottom-8">
+            
+            {/* 애플 스타일의 미니멀 배지 */}
+            <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700/80 text-[10px] font-semibold tracking-wider uppercase mb-6 select-none animate-pulse">
+              Introducing MyLink
+            </div>
+            
+            {/* 웅장하고 큰 메인 카피 */}
+            <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-foreground leading-[1.1] max-w-lg mb-4">
+              Development in
+              <span className="block bg-gradient-to-r from-zinc-950 via-zinc-700 to-zinc-500 dark:from-white dark:via-zinc-300 dark:to-zinc-500 bg-clip-text text-transparent">
+                One Link
+              </span>
+            </h1>
 
-                {/* 시각적 모형 링크 데모 카드 (Premium 느낌용 피처 데모) */}
-                <div className="w-full flex flex-col gap-2.5 opacity-80 border-t border-border/40 pt-6">
-                  <div className="flex items-center gap-3 p-3 bg-muted/40 rounded-xl border border-border/30 hover:bg-muted/60 transition-all select-none">
-                    <span className="text-sm">💻</span>
-                    <span className="text-xs font-semibold text-foreground/80">My GitHub Profile</span>
+            {/* 깔끔한 서브 헤드라인 */}
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-sm leading-relaxed font-normal mb-8 px-4">
+              깃허브, 블로그, 포트폴리오를 가장 미니멀하고 직관적인 단 하나의 링크로 통합하여 표현해 보세요.
+            </p>
+
+            {/* 시작하기 및 데모 둘러보기 버튼 영역 */}
+            <div className="w-full max-w-xs flex flex-col gap-4 px-4 mb-16">
+              <Button 
+                onClick={handleLogin}
+                className="w-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-100 active:scale-[0.98] transition-all py-6 text-sm font-semibold rounded-full cursor-pointer border-none shadow-md"
+              >
+                Google 계정으로 시작하기
+              </Button>
+              <a 
+                href="/?uid=anonymous&preview=true" 
+                className="text-xs text-zinc-500 hover:text-zinc-950 dark:hover:text-white hover:underline transition-all"
+              >
+                데모 페이지 둘러보기 &rarr;
+              </a>
+            </div>
+
+            {/* 하단 모던 브라우저 목업 데모 (화면 꽉 채우기 목적) */}
+            <div className="w-full max-w-md px-2">
+              <div className="relative rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-900/40 backdrop-blur-md p-5 shadow-2xl overflow-hidden text-left">
+                <div className="flex items-center gap-1.5 border-b border-zinc-200 dark:border-zinc-800/80 pb-3.5 mb-3.5 select-none">
+                  <div className="h-2.5 w-2.5 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+                  <div className="h-2.5 w-2.5 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+                  <div className="h-2.5 w-2.5 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+                  <span className="text-[9px] text-zinc-400 dark:text-zinc-600 ml-2 font-mono">mylink.to/developer</span>
+                </div>
+                <div className="flex flex-col gap-2.5">
+                  <div className="h-10 rounded-xl bg-white dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 text-xs font-semibold text-zinc-800 dark:text-zinc-200 shadow-sm">
+                    <span className="flex items-center gap-2">💻 GitHub Profile</span>
+                    <span className="text-zinc-400">&rarr;</span>
                   </div>
-                  <div className="flex items-center gap-3 p-3 bg-muted/40 rounded-xl border border-border/30 hover:bg-muted/60 transition-all select-none">
-                    <span className="text-sm">📝</span>
-                    <span className="text-xs font-semibold text-foreground/80">Tech Blog Links</span>
+                  <div className="h-10 rounded-xl bg-white dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 text-xs font-semibold text-zinc-800 dark:text-zinc-200 shadow-sm">
+                    <span className="flex items-center gap-2">📝 Development Blog</span>
+                    <span className="text-zinc-400">&rarr;</span>
                   </div>
                 </div>
-
-                {/* 소셜 로그인 시작하기 버튼 */}
-                <Button 
-                  onClick={handleLogin}
-                  style={{ backgroundColor: "#5B5FC7" }}
-                  className="w-full text-white hover:opacity-95 active:scale-[0.98] transition-all py-6 font-semibold rounded-xl cursor-pointer border-none flex items-center justify-center gap-2 shadow-lg shadow-violet-500/20 text-sm mt-2"
-                >
-                  Google 계정으로 시작하기
-                </Button>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
+            
           </div>
         ) : (
           /* ========================================================
@@ -481,7 +496,7 @@ export default function Page() {
              ======================================================== */
           <>
             {/* 사용자 프로필 헤더 */}
-            <div className="flex flex-col items-center text-center gap-4">
+            <div className="flex flex-col items-center text-center gap-4 animate-fade-in">
               <Avatar size="lg" className="h-24 w-24 ring-4 ring-background shadow-lg transition-transform duration-300 hover:scale-105">
                 <AvatarImage src={profile?.profile_image_url || user.photoURL || undefined} alt="Profile avatar image" />
                 <AvatarFallback className="text-2xl font-bold bg-gradient-to-tr from-primary/80 to-violet-500/80 text-white">{getInitials()}</AvatarFallback>
@@ -690,22 +705,11 @@ export default function Page() {
                               </div>
                             </div>
 
-                            {/* 중앙 정렬된 링크 제목 */}
-                            <div className="text-center min-w-0 px-2 flex flex-col gap-0.5">
+                            {/* 중앙 정렬된 링크 제목 (수정 시각 노출 제거) */}
+                            <div className="text-center min-w-0 px-2">
                               <h2 className="text-sm font-semibold tracking-wide text-foreground group-hover:text-primary transition-colors truncate">
                                 {link.title}
                               </h2>
-                              {link.updated_at && (
-                                <p className="text-[10px] text-muted-foreground/60 select-none">
-                                  수정됨: {new Date(link.updated_at).toLocaleString("ko-KR", {
-                                    year: "numeric",
-                                    month: "2-digit",
-                                    day: "2-digit",
-                                    hour: "2-digit",
-                                    minute: "2-digit"
-                                  })}
-                                </p>
-                              )}
                             </div>
 
                             {/* 오른쪽 수정/삭제 버튼 영역 */}
